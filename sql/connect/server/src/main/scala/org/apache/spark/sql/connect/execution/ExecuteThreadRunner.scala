@@ -289,9 +289,9 @@ private[connect] class ExecuteThreadRunner(executeHolder: ExecuteHolder) extends
 
   /**
    * Perform a check to see if we should delegate sending ResultCompelete. Currently, the
-   * ADD_LISTENER_BUS_LISTENER command creates a new thread and continuously streams back listener
-   * events to the client side StreamingQueryListenerBus. In this case, we would like to delegate
-   * the sending of the final ResultComplete to the handler thread itself.
+   * ADD_LISTENER_BUS_LISTENER command creates a new thread and continuously streams back events to
+   * the client side. In this case, we would like to delegate the sending of the final
+   * ResultComplete to the handler thread itself.
    * @param request
    *   The request to check
    * @return
@@ -301,10 +301,10 @@ private[connect] class ExecuteThreadRunner(executeHolder: ExecuteHolder) extends
   private[connect] def shouldDelegateCompleteResponse(
       request: proto.ExecutePlanRequest): Boolean = {
     request.getPlan.getOpTypeCase == proto.Plan.OpTypeCase.COMMAND &&
-    request.getPlan.getCommand.getCommandTypeCase ==
+      (request.getPlan.getCommand.getCommandTypeCase ==
       proto.Command.CommandTypeCase.STREAMING_QUERY_LISTENER_BUS_COMMAND &&
       request.getPlan.getCommand.getStreamingQueryListenerBusCommand.getCommandCase ==
-      proto.StreamingQueryListenerBusCommand.CommandCase.ADD_LISTENER_BUS_LISTENER
+      proto.StreamingQueryListenerBusCommand.CommandCase.ADD_LISTENER_BUS_LISTENER)
   }
 
   private def handlePlan(request: proto.ExecutePlanRequest): Unit = {

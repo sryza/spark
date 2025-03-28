@@ -55,6 +55,7 @@ from typing import (
 import pandas as pd
 import pyarrow as pa
 
+from google.protobuf.descriptor import Descriptor
 import google.protobuf.message
 from grpc_status import rpc_status
 import grpc
@@ -1182,6 +1183,34 @@ class SparkConnectClient(object):
                     },
                 )
 
+    def execute_extension_command(
+        self, command: pb2.Command, descriptor: Descriptor
+    ) -> any_pb2.Any:
+        """
+        Execute given extension command return the response.
+        :param command: The command to send.
+        :param descriptor: The expected descriptor of the response.
+        :return: `Any` containing the response
+        """
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Execute extension command for command {self._proto_to_string(command)}")
+        req = self._execute_plan_request_with_metadata()
+        if self._user_id:
+            req.user_context.user_id = self._user_id
+        req.plan.command.CopyFrom(command)
+        # Execute the request and iterate over the streaming results. We capture the schema
+        # response and unpack the CloudResultBatch responses.
+        for response in self._execute_and_fetch_as_iterator(req, {}):
+            if isinstance(response, any_pb2.Any) and response.Is(descriptor):
+                return response
+            else:
+                raise PySparkValueError(
+                    errorClass="UNKNOWN_RESPONSE",
+                    messageParameters={
+                        "response": str(response),
+                    },
+                )
+
     def same_semantics(self, plan: pb2.Plan, other: pb2.Plan) -> bool:
         """
         return if two plans have the same semantics.
@@ -1474,6 +1503,10 @@ class SparkConnectClient(object):
             if b.HasField("streaming_query_listener_events_result"):
                 event_result = b.streaming_query_listener_events_result
                 yield {"streaming_query_listener_events_result": event_result}
+            if b.HasField("pipeline_command_result"):
+                yield {"pipeline_command_result": b.pipeline_command_result}
+            if b.HasField("pipeline_event_result"):
+                yield {"pipeline_event_result": b.pipeline_event_result}
             if b.HasField("get_resources_command_result"):
                 resources = {}
                 for key, resource in b.get_resources_command_result.resources.items():

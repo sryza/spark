@@ -462,6 +462,11 @@
       "StructField does not have typeName. Use typeName on its type explicitly instead."
     ]
   },
+  "GRAPH_ELEMENT_DEFINED_OUTSIDE_OF_DECLARATIVE_PIPELINE": {
+    "message": [
+      "APIs that define elements of a declarative pipeline can only be invoked within the context of defining a pipeline."
+    ]
+  },
   "INVALID_TYPE_DF_EQUALITY_ARG": {
     "message": [
       "Expected type <expected_type> for `<arg_name>` but got type <actual_type>."
@@ -897,6 +902,46 @@
   "PIPE_FUNCTION_EXITED": {
     "message": [
       "Pipe function `<func_name>` exited with error code <error_code>."
+    ]
+  },
+  "PIPELINE_SPEC_FIELD_NOT_DICT": {
+    "message": [
+      "Pipeline spec field `<field_name>` should be a dict, got <field_type>."
+    ]
+  },
+  "PIPELINE_SPEC_FILE_DOES_NOT_EXIST": {
+    "message": [
+      "The pipeline spec file `<spec_path>` does not exist."
+    ]
+  },
+  "ATTEMPT_ANALYSIS_IN_PIPELINE_QUERY_FUNCTION": {
+    "message": [
+      "Operations that trigger DataFrame analysis or execution are not allowed in pipeline query functions. Move code outside of the pipeline query function."
+    ]
+  },
+  "PIPELINE_SPEC_FILE_NOT_FOUND": {
+    "message": [
+      "No pipeline.json file provided in arguments or found in directory `<dir_path>` or readable ancestor directories."
+    ]
+  },
+  "PIPELINE_SPEC_DICT_KEY_NOT_STRING": {
+    "message": [
+      "For pipeline spec field `<field_name>`, key should be a string, got <key_type>."
+    ]
+  },
+  "PIPELINE_SPEC_DICT_VALUE_NOT_STRING": {
+    "message": [
+      "For pipeline spec field `<field_name>`, value for key `<key_name>` should be a string, got <value_type>."
+    ]
+  },
+  "PIPELINE_SPEC_UNEXPECTED_FIELD": {
+    "message": [
+      "Pipeline spec field `<field_name>` is unexpected."
+    ]
+  },
+  "PIPELINE_UNSUPPORTED_DEFINITIONS_FILE_EXTENSION": {
+    "message": [
+      "Pipeline definitions file `<file_path>` has an unsupported extension. Supported extensions are `.py` and `.sql`."
     ]
   },
   "PLOT_INVALID_TYPE_COLUMN": {

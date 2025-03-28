@@ -254,7 +254,8 @@ object SparkBuild extends PomBuild {
         // SPARK-46938 to prevent enum scan on pmml-model, under spark-mllib module.
         "-Wconf:cat=other&site=org.dmg.pmml.*:w",
         // SPARK-49937 ban call the method `SparkThrowable#getErrorClass`
-        "-Wconf:cat=deprecation&msg=method getErrorClass in trait SparkThrowable is deprecated:e"
+        "-Wconf:cat=deprecation&msg=method getErrorClass in trait SparkThrowable is deprecated:e",
+        "-Wconf:cat=scaladoc:i"
       )
     }
   )
@@ -418,9 +419,12 @@ object SparkBuild extends PomBuild {
 
   enable(HiveThriftServer.settings)(hiveThriftServer)
 
+  enable(SparkConnect.settings)(pipelines)
+
   enable(SparkConnectCommon.settings)(connectCommon)
   enable(SparkConnect.settings)(connect)
   enable(SparkConnectClient.settings)(connectClient)
+
 
   /* Protobuf settings */
   enable(SparkProtobuf.settings)(protobuf)
@@ -770,7 +774,7 @@ object SparkConnect {
       val validPrefixes = Set("spark-connect", "unused-", "guava-", "failureaccess-",
         "annotations-", "grpc-", "protobuf-", "gson", "error_prone_annotations",
         "j2objc-annotations", "animal-sniffer-annotations", "perfmark-api",
-        "proto-google-common-protos")
+        "proto-google-common-protos", "spark-pipelines")
       cp filterNot { v =>
         validPrefixes.exists(v.data.getName.startsWith)
       }

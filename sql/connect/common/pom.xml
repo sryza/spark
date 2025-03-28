@@ -173,6 +173,9 @@
                             <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
                             <pluginId>grpc-java</pluginId>
                             <pluginArtifact>io.grpc:protoc-gen-grpc-java:${io.grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
+                            <additionalProtoPathElements>
+                                <additionalProtoPathElement>${project.parent.basedir}/sql/pipelines/common/src/main/protobuf</additionalProtoPathElement>
+                            </additionalProtoPathElements>
                             <protoSourceRoot>src/main/protobuf</protoSourceRoot>
                         </configuration>
                         <executions>
