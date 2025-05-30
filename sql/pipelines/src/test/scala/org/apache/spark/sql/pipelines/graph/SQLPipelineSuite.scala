@@ -17,19 +17,45 @@
 package org.apache.spark.sql.pipelines.graph
 
 import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.pipelines.utils.{PipelineTest, TestGraphRegistrationContext}
 import org.apache.spark.sql.types.{LongType, StructType}
 import org.apache.spark.util.Utils
 
 class SQLPipelineSuite extends PipelineTest {
+  private val externalTable1Ident = TableIdentifier(
+    table = "external_t1",
+    database = Option(TestGraphRegistrationContext.DEFAULT_DATABASE),
+    catalog = Option(TestGraphRegistrationContext.DEFAULT_CATALOG)
+  )
+  private val externalTable2Ident = TableIdentifier(
+    table = "external_t2",
+    database = Option(TestGraphRegistrationContext.DEFAULT_DATABASE),
+    catalog = Option(TestGraphRegistrationContext.DEFAULT_CATALOG)
+  )
+
+  override def beforeEach(): Unit = {
+    super.beforeEach()
+    // Create mock external tables that tests can reference, ex. to stream from.
+    spark.sql(s"CREATE TABLE $externalTable1Ident AS SELECT * FROM RANGE(3)")
+    spark.sql(s"CREATE TABLE $externalTable2Ident AS SELECT * FROM RANGE(4)")
+  }
+
+  override def afterEach(): Unit = {
+    spark.sql(s"DROP TABLE IF EXISTS $externalTable1Ident")
+    spark.sql(s"DROP TABLE IF EXISTS $externalTable2Ident")
+    super.afterEach()
+  }
+
   test("Simple register SQL dataset test") {
     val unresolvedDataflowGraph = unresolvedDataflowGraphFromSql(
-      sqlText = """
+      sqlText = s"""
         |CREATE MATERIALIZED VIEW mv AS SELECT 1;
-        |CREATE STREAMING TABLE st AS SELECT * FROM STREAM mv;
+        |CREATE STREAMING TABLE st AS SELECT * FROM STREAM $externalTable1Ident;
         |CREATE VIEW v AS SELECT * FROM mv;
-        |CREATE FLOW f AS INSERT INTO st BY NAME SELECT * FROM v;
+        |CREATE FLOW f AS INSERT INTO st BY NAME
+        |SELECT * FROM STREAM $externalTable2Ident;
         |""".stripMargin
     )
     val resolvedDataflowGraph = unresolvedDataflowGraph.resolve()
@@ -49,7 +75,9 @@ class SQLPipelineSuite extends PipelineTest {
       resolvedDataflowGraph.resolvedFlows
         .filter(_.identifier == fullyQualifiedIdentifier("st"))
         .head
-    assert(stFlow.inputs == Set(fullyQualifiedIdentifier("mv")))
+    // The streaming table has 1 external input, and no internal (defined within pipeline) inputs
+    assert(stFlow.funcResult.usedExternalInputs == Set(externalTable1Ident.quotedString))
+    assert(stFlow.inputs.isEmpty)
     assert(stFlow.destinationIdentifier == fullyQualifiedIdentifier("st"))
 
     val viewFlow =
@@ -61,7 +89,8 @@ class SQLPipelineSuite extends PipelineTest {
 
     val namedFlow =
       resolvedDataflowGraph.resolvedFlows.filter(_.identifier == fullyQualifiedIdentifier("f")).head
-    assert(namedFlow.inputs == Set(fullyQualifiedIdentifier("v")))
+    assert(namedFlow.funcResult.usedExternalInputs == Set(externalTable2Ident.quotedString))
+    assert(namedFlow.inputs.isEmpty)
     assert(namedFlow.destinationIdentifier == fullyQualifiedIdentifier("st"))
   }
 
@@ -117,7 +146,7 @@ class SQLPipelineSuite extends PipelineTest {
     val unresolvedDataflowGraph = unresolvedDataflowGraphFromSql(
       sqlText = """
                   |CREATE MATERIALIZED VIEW `hyphen-mv` AS SELECT * FROM range(1, 4);
-                  |CREATE STREAMING TABLE `hyphen-st` AS SELECT * FROM STREAM(`hyphen-mv`)
+                  |CREATE MATERIALIZED VIEW `other-hyphen-mv` AS SELECT * FROM `hyphen-mv`
                   |""".stripMargin
     )
 
@@ -130,7 +159,8 @@ class SQLPipelineSuite extends PipelineTest {
 
     assert(
       resolvedDataflowGraph.resolvedFlows
-        .exists(f => f.identifier == fullyQualifiedIdentifier("hyphen-st") && f.df.isStreaming)
+        .exists(f =>
+          f.identifier == fullyQualifiedIdentifier("other-hyphen-mv") && !f.df.isStreaming)
     )
   }
 
@@ -179,10 +209,9 @@ class SQLPipelineSuite extends PipelineTest {
 
   test("Pipeline datasets can have dependency on streaming table") {
     val unresolvedDataflowGraph = unresolvedDataflowGraphFromSql(
-      sqlText = """
-                  |CREATE MATERIALIZED VIEW a AS SELECT * FROM RANGE(5);
-                  |CREATE STREAMING TABLE b AS SELECT * FROM STREAM(a);
-                  |CREATE MATERIALIZED VIEW c AS SELECT * FROM b;
+      sqlText = s"""
+                  |CREATE STREAMING TABLE a AS SELECT * FROM STREAM($externalTable1Ident);
+                  |CREATE MATERIALIZED VIEW b AS SELECT * FROM a;
                   |""".stripMargin
     )
 
@@ -190,9 +219,9 @@ class SQLPipelineSuite extends PipelineTest {
 
     assert(
       spark
-        .sql(s"SELECT * FROM ${fullyQualifiedIdentifier("c").quotedString}")
+        .sql(s"SELECT * FROM ${fullyQualifiedIdentifier("b").quotedString}")
         .collect()
-        .toSet == Set(0, 1, 2, 3, 4).map(Row(_))
+        .toSet == Set(0, 1, 2).map(Row(_))
     )
   }
 
@@ -577,9 +606,10 @@ class SQLPipelineSuite extends PipelineTest {
 
     val ex = intercept[AnalysisException] {
       sqlGraphRegistrationContext.processSqlFile(
-        sqlText = """
-            |CREATE MATERIALIZED VIEW mv AS SELECT 1;
-            |CREATE FLOW some_database.f AS INSERT INTO mv BY NAME SELECT 2;
+        sqlText = s"""
+            |CREATE STREAMING TABLE st;
+            |CREATE FLOW some_database.f AS INSERT INTO st BY NAME
+            |SELECT * FROM STREAM $externalTable1Ident;
             |""".stripMargin,
         sqlFilePath = "a.sql",
         spark = spark
@@ -653,7 +683,7 @@ class SQLPipelineSuite extends PipelineTest {
               |-- catalog and database, regardless of what the active catalog/database are.
               |CREATE TEMPORARY VIEW tv AS SELECT * FROM $pipelineCatalog.$pipelineDatabase.mv;
               |
-              |CREATE STREAMING TABLE st AS
+              |CREATE MATERIALIZED VIEW mv4 AS
               |WITH mv2 AS (SELECT * FROM $pipelineCatalog.$otherDatabase2.mv2)
               |SELECT * FROM STREAM(mv2) WHERE mv2.id % 2 == 0;
               |
@@ -661,11 +691,11 @@ class SQLPipelineSuite extends PipelineTest {
               |USE NAMESPACE $pipelineCatalog.$otherDatabase2;
               |-- mv2 was originally created in this same namespace, so implicit qualification
               |-- should work.
-              |CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM mv2;
+              |CREATE MATERIALIZED VIEW mv5 AS SELECT * FROM mv2;
               |
               |-- Temp views, which don't support name qualification, should always resolve to
               |-- pipeline catalog and database despite the active catalog/database
-              |CREATE MATERIALIZED VIEW mv5 AS SELECT * FROM tv;
+              |CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM tv;
               |""".stripMargin,
           sqlFilePath = "file1.sql"
         ),
@@ -677,7 +707,7 @@ class SQLPipelineSuite extends PipelineTest {
               |--
               |-- Should also be able to read dataset created in other file with custom catalog
               |-- and database.
-              |CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM $pipelineCatalog.$otherDatabase2.mv4;
+              |CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM $pipelineCatalog.$otherDatabase2.mv5;
               |""".stripMargin,
           sqlFilePath = "file2.sql"
         )
@@ -689,13 +719,13 @@ class SQLPipelineSuite extends PipelineTest {
     assert(spark.sql(s"SELECT * FROM $pipelineCatalog.$otherDatabase2.mv3")
       .collect().toSet == Set(1, 2).map(Row(_)))
 
-    assert(spark.sql(s"SELECT * FROM $otherCatalog.$otherDatabase.st")
+    assert(spark.sql(s"SELECT * FROM $otherCatalog.$otherDatabase.mv4")
       .collect().toSet == Set(2, 4).map(Row(_)))
 
-    assert(spark.sql(s"SELECT * FROM $otherDatabase2.mv4")
+    assert(spark.sql(s"SELECT * FROM $otherDatabase2.mv5")
       .collect().toSet == Set(1, 2, 3, 4).map(Row(_)))
 
-    assert(spark.sql(s"SELECT * FROM $otherDatabase2.mv5")
+    assert(spark.sql(s"SELECT * FROM $otherDatabase2.mv6")
       .collect().toSet == Set(0, 1, 2).map(Row(_)))
 
     assert(spark.sql(s"SELECT * FROM $pipelineCatalog.$pipelineDatabase.mv6")
@@ -751,9 +781,9 @@ class SQLPipelineSuite extends PipelineTest {
 
   test("Creating streaming table without subquery works if streaming table is backed by flows") {
     val unresolvedDataflowGraph = unresolvedDataflowGraphFromSql(
-      sqlText = """
+      sqlText = s"""
           |CREATE STREAMING TABLE st;
-          |CREATE FLOW f AS INSERT INTO st BY NAME SELECT * FROM RANGE(3);
+          |CREATE FLOW f AS INSERT INTO st BY NAME SELECT * FROM STREAM $externalTable1Ident;
           |""".stripMargin
     )
 
@@ -781,5 +811,4 @@ class SQLPipelineSuite extends PipelineTest {
       parameters = Map("identifier" -> fullyQualifiedIdentifier("st").quotedString)
     )
   }
-  // TODO: add persisted view test once implemented
 }
