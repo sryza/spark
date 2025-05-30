@@ -17,8 +17,9 @@
 
 package org.apache.spark.sql.pipelines.graph
 
-// import org.apache.spark.SparkThrowable
-// import org.apache.spark.sql.AnalysisException
+import scala.jdk.CollectionConverters._
+
+import org.apache.spark.SparkThrowable
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Expressions
 import org.apache.spark.sql.execution.streaming.MemoryStream
@@ -26,9 +27,6 @@ import org.apache.spark.sql.pipelines.graph.DatasetManager.TableMaterializationE
 import org.apache.spark.sql.pipelines.utils.{BaseCoreExecutionTest, TestGraphRegistrationContext}
 import org.apache.spark.sql.types._
 import org.apache.spark.util.Utils.exceptionString
-// import org.apache.spark.sql.execution.streaming.MemoryStream
-// import org.apache.spark.sql.functions.{col, lit}
-// import org.apache.spark.util.Utils.exceptionString
 
 /**
  * Local integration tests for materialization of [[Table]]s in a [[DataflowGraph]] to make sure
@@ -151,45 +149,38 @@ class MaterializeTablesSuite extends BaseCoreExecutionTest {
     assert(catalogTable2.schema == new StructType().add("y", StringType))
   }
 
-//  test("non materialized tables don't get materialized") {
-//    val identifier1 = new TableIdentifier("t1", schemaInPipelineSpec)
-//    val identifier2 = new TableIdentifier("t2", schemaInPipelineSpec)
-//
-//    materializeGraph(
-//      new TestGraphRegistrationContext(
-//        flows = Seq(
-//         registerFlow(
-//            identifier1,
-//            identifier1,
-//            query = dfFlowFunc(Seq(1, 2, 3).toDF("x")),
-//          ),
-//         registerFlow(
-//            TableIdentifier("t2"),
-//            TableIdentifier("t2"),
-//            query = dfFlowFunc(Seq("a", "b").toDF("y"))
-//          )
-//        ),
-//        tables = Seq(Table(TableIdentifier("t2"), explicitPath = Option(p + "/t2"))),
-//        views = Seq(
-//          TemporaryView(
-//            identifier = identifier1,
-//          )
-//        )
-//      )
-//    )
-//
-//    assert(deltaLog1.snapshot.version < 0)
-//    assert(deltaLog2.snapshot.version == 0)
-//    assert(deltaLog2.snapshot.schema == new StructType().add("y", StringType))
-//  }
+  test("temporary views don't get materialized") {
+    materializeGraph(
+      new TestGraphRegistrationContext(spark) {
+        registerFlow(
+          "t2",
+          "t2",
+          query = dfFlowFunc(Seq("a", "b").toDF("y"))
+        )
+        registerTable("t2")
+        registerView(
+          "t1",
+          dfFlowFunc(Seq(1, 2, 3).toDF("x"))
+        )
+      }.resolveToDataflowGraph()
+    )
 
-  //  scalastyle:off
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+    assert(
+      !catalog.tableExists(
+        Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "t1")
+      )
+    )
+    assert(
+      catalog.tableExists(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "t2"))
+    )
+  }
 
-  // TableManager performs different validations for batch tables vs incremental tables when
+  // TableManager performs different validations for batch tables vs streaming tables when
   // materializing tables. Flows writing to a batch tables can have incompatible schemas with the
   // existing table since the table is being overwritten completely. This test ensures that
   // it is possible to do that.
-  test("batch flow reading from incremental table") {
+  test("batch flow reading from streaming table") {
     class P1 extends TestGraphRegistrationContext(spark) {
       registerTable(
         "a",
@@ -360,7 +351,8 @@ class MaterializeTablesSuite extends BaseCoreExecutionTest {
 
   test("specifying partition column with existing partitioned table") {
     sql(
-      s"CREATE TABLE ${TestGraphRegistrationContext.DEFAULT_DATABASE}.t7(x BOOLEAN, y INT) PARTITIONED BY (x)"
+      s"CREATE TABLE ${TestGraphRegistrationContext.DEFAULT_DATABASE}.t7(x BOOLEAN, y INT) " +
+      s"PARTITIONED BY (x)"
     )
     val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
     val identifier = Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "t7")
@@ -393,485 +385,369 @@ class MaterializeTablesSuite extends BaseCoreExecutionTest {
     assert(table2.schema == new StructType().add("y", IntegerType).add("x", BooleanType))
     assert(table2.partitioning().toSeq == Seq(Expressions.identity("x")))
 
-    // Don't specify any partition column; use the one from the table.
-    materializeGraph(
-      new TestGraphRegistrationContext(spark) {
-        registerFlow(
-          "t7",
-          "t7",
-          query = dfFlowFunc(Seq((true, 1), (false, 3)).toDF("x", "y"))
-        )
-        registerTable("t7")
-      }.resolveToDataflowGraph()
-    )
+    // Don't specify any partition column; should throw.
+    val ex = intercept[TableMaterializationException] {
+      materializeGraph(
+        new TestGraphRegistrationContext(spark) {
+          registerFlow(
+            "t7",
+            "t7",
+            query = dfFlowFunc(Seq((true, 1), (false, 3)).toDF("x", "y"))
+          )
+          registerTable("t7")
+        }.resolveToDataflowGraph()
+      )
+    }
+    assert(ex.cause.asInstanceOf[SparkThrowable].getCondition == "CANNOT_UPDATE_PARTITION_COLUMNS")
 
     val table3 = catalog.loadTable(identifier)
     assert(table3.schema == new StructType().add("y", IntegerType).add("x", BooleanType))
     assert(table3.partitioning().toSeq == Seq(Expressions.identity("x")))
   }
 
-//  test("specifying partition column different from existing partitioned table") {
-//    sql(s"CREATE TABLE ${TestGraphRegistrationContext.DEFAULT_DATABASE}.t8(x BOOLEAN, y INT) PARTITIONED BY (x)")
-//    Seq((true, 1), (false, 1)).toDF("x", "y").write.mode("append").format("delta").save(p)
-//    assert(table.schema == new StructType().add("x", BooleanType).add("y", IntegerType))
-//    assert(deltaLog.snapshot.dataSchema == new StructType().add("y", IntegerType))
-//
-//    // Specify a different partition column. Should throw.
-//    val graph = DataflowGraph(
-//      flows = Seq(
-//       registerFlow(
-//          TableIdentifier(p),
-//          dummyPipeline,
-//          TableIdentifier(p),
-//          currentCatalog = catalogInPipelineSpec,
-//          query = dfFlowFunc(Seq((true, 1), (false, 3)).toDF("x", "y"))
-//        )
-//      ),
-//      tables = Seq(
-//        Table(
-//          identifier = TableIdentifier(p),
-//          partitionCols = Option(Seq("y"))
-//        )
-//      ),
-//      views = Seq.empty
-//    )
-//
-//    val ex = intercept[TableMaterializationException] {
-//      materializeGraph(graph)
-//    }
-//    assert(ex.cause.asInstanceOf[SparkThrowable].getErrorClass == "CANNOT_UPDATE_PARTITION_COLUMNS")
-//    assert(table.schema == new StructType().add("x", BooleanType).add("y", IntegerType))
-//    assert(deltaLog.snapshot.dataSchema == new StructType().add("y", IntegerType))
-//  }
-//
-//  test("Table properties are set when table gets materialized") {
-//
-//    val graph =
-//      materializeGraph(
-//        DataflowGraph(
-//          new TestGraphRegistrationContext(spark) {
-//            registerTable("a")
-//              .query(spark.readStream.format("rate").load())
-//              .tableProperty("pipelines.autoOptimize.zordercols", "value")
-//              .tableProperty("some.prop", "foo")
-//              .tableProperty("delta.enableExpiredLogCleanup", "false")
-//            registerTable("b")
-//              .query(readStream("a"))
-//              .tableProperty("pipelines.autoOptimize.zordercoLS", "value")
-//              .tableProperty("some.prop", "foo")
-//              .tableProperty("delta.enableExpiredLogCleanup", "false")
-//          }
-//        )
-//      )
-//    val deltaLogA = DeltaLog.forTable(spark, graph.tableByName(materializationName("a")).path)
-//    val deltaLogB = DeltaLog.forTable(spark, graph.tableByName(materializationName("b")).path)
-//
-//    var expectedProps = Map(
-//      "pipelines.autoOptimize.zOrderCols" -> "value",
-//      "some.prop" -> "foo",
-//      "delta.enableExpiredLogCleanup" -> "false",
-//      "pipelines.pipelineId" -> updateContext.defaultOrigin.getPipelineId
-//    )
-//
-//    val enableCDF = (updateContext.pipelineConf.cdfEnabled.value
-//      || (updateContext.pipelineConf.enzymeModeEnabled(EnzymeRuntimeMode.Advanced)
-//      && !updateContext.pipelineConf.cdfDisabledForEnzyme.value))
-//    expectedProps = expectedProps + ("delta.enableChangeDataFeed" -> enableCDF.toString)
-//
-//    if (updateContext.pipelineConf.enzymeModeEnabled(EnzymeRuntimeMode.Advanced)) {
-//      expectedProps = expectedProps + (InternalTablePropertyKey.ENZYME_MODE_KEY -> EnzymeRuntimeMode.Advanced.toString)
-//    }
-//
-//    if (updateContext.isUCPipeline) {
-//      expectedProps = expectedProps + (InternalTablePropertyKey.CATALOG_TYPE_KEY -> CatalogType.UNITY_CATALOG.toString)
-//    }
-//    assert(deltaLogA.snapshot.metadata.configuration == expectedProps)
-//    assert(deltaLogB.snapshot.metadata.configuration == expectedProps)
-//  }
-//
-//  test("Invalid table properties error during table materialization") {
-//
-//    // Invalid pipelines property
-//    val graph1 = DataflowGraph(
-//      new TestGraphRegistrationContext(spark) {
-//        registerTable("a")
-//          .query(Seq(1).toDF())
-//          .tableProperty("pipelines.autoOptimize.managed", "123")
-//      }
-//    )
-//    val ex1 =
-//      intercept[TableMaterializationException] {
-//        materializeGraph(graph1)
-//      }
-//
-//    assert(ex1.cause.isInstanceOf[IllegalArgumentException])
-//    assert(ex1.cause.getMessage.contains("pipelines.autoOptimize.managed"))
-//
-//    // Invalid delta property
-//    val graph2 = DataflowGraph(
-//      new TestGraphRegistrationContext(spark) {
-//        registerTable("a")
-//          .query(Seq(1).toDF())
-//          .tableProperty("delta.enableExpiredLogCleanup", "123")
-//      }
-//    )
-//    val ex2 = intercept[TableMaterializationException] {
-//      materializeGraph(graph2)
-//    }
-//    assert(ex2.cause.isInstanceOf[IllegalArgumentException])
-//  }
-//
-//  test("Spark confs are applied when a table is materialized") {
-//
-//    val graph =
-//      materializeGraph(
-//        DataflowGraph(
-//          new TestGraphRegistrationContext(spark) {
-//            registerTable("a")
-//              .query(spark.readStream.format("rate").load())
-//              .sparkConf("spark.databricks.delta.properties.defaults.appendOnly", "true")
-//            registerTable("b")
-//              .query(readStream("a"))
-//              .sparkConf("spark.databricks.delta.properties.defaults.appendOnly", "false")
-//          }
-//        )
-//      )
-//
-//    def validateAppendOnly(tableName: String, expected: Boolean): Unit = {
-//      val config = DeltaLog
-//        .forTable(spark, graph.tableByName(materializationName(tableName)).path)
-//        .getChanges(0)
-//        .flatMap(_._2)
-//        .collect { case m: Metadata => m }
-//        .next
-//        .configuration
-//      assert(config.get("delta.appendOnly").contains(expected.toString))
-//    }
-//
-//    validateAppendOnly(tableName = "a", expected = true)
-//    validateAppendOnly(tableName = "b", expected = false)
-//  }
-//
-//  /**
-//   * Creates a Delta table with the provided table properties.
-//   *
-//   * @param path       The path to the Delta table.
-//   * @param properties The properties that are set on the Delta table.
-//   */
-//  private def createDeltaTableWithProperties(
-//                                              path: String,
-//                                              properties: Map[String, String]): Unit = {
-//    val deltaLog = DeltaLog.forTable(spark, path)
-//    val txn = deltaLog.startTransaction()
-//    txn.readWholeTable()
-//    val metadata = txn.metadata.copy(configuration = properties)
-//    txn.updateMetadata(metadata)
-//    txn.commit(Nil, DeltaOperations.ManualUpdate)
-//  }
-//
-//  /**
-//   * Creates a Delta table that is owned by a pipeline.
-//   *
-//   * @param path       The path to the Delta table.
-//   * @param pipelineId The id of the pipeline that manages this table.
-//   */
-//  private def createDeltaTableOwnedByPipeline(path: String, pipelineId: String): Unit = {
-//    createDeltaTableWithProperties(path, Map("pipelines.pipelineId" -> pipelineId))
-//  }
-//
-//  class SimpleRateStreamPipeline extends Pipeline {
-//    registerTable("a").query(spark.readStream.format("rate").load())
-//  }
-//
-//  test(
-//    "Materialization succeeds even if there are unknown pipeline properties on the existing table"
-//  ) {
-//    val rawGraph = DataflowGraph(new SimpleRateStreamPipeline)
-//    val (graph1, _, _) = executeInitializingStage(rawGraph)
-//    // Add a property to the delta table.
-//    val tablePath = graph1.tableByName(materializationName("a")).path
-//    createDeltaTableWithProperties(
-//      tablePath,
-//      Map("pipelines.someProperty" -> "foo")
-//    )
-//    val deltaLog = DeltaLog.forTable(spark, tablePath)
-//    val tableProps = deltaLog.snapshot.metadata.configuration
-//    assert(tableProps("pipelines.someProperty") == "foo")
-//
-//    // Check that table property still exists after second update.
-//    materializeGraph(rawGraph)
-//    // Existing properties are overwritten
-//    val deltaLog2 = DeltaLog.forTable(spark, tablePath)
-//    val tableProps2 = deltaLog2.snapshot.metadata.configuration
-//    assert(tableProps2.get("pipelines.someProperty").isEmpty)
-//  }
-//
-//  test("Existing tables with no pipelineId property are updated with the correct pipelineId") {
-//    val rawGraph = DataflowGraph(new SimpleRateStreamPipeline)
-//    val (graph, _, _) = executeInitializingStage(rawGraph)
-//    val tablePath = graph.tableByName(materializationName("a")).path
-//    // Simulate an existing delta table with no pipelineId
-//    spark.range(1, 3).write.format("delta").mode("overwrite").save(tablePath)
-//    materializeGraph(rawGraph)
-//
-//    assertNoDeprecationEvents()
-//    val deltaLog = DeltaLog.forTable(spark, tablePath)
-//    val tableProps = deltaLog.snapshot.metadata.configuration
-//    assert(tableProps("pipelines.pipelineId") == updateContext.defaultOrigin.getPipelineId)
-//  }
-//
-//  for (isFullRefresh <- Seq(true, false)) {
-//    test(
-//      s"Complete tables should not evolve schema - isFullRefresh = $isFullRefresh"
-//    ) {
-//      val rawGraph = DataflowGraph(
-//        new TestGraphRegistrationContext(spark) {
-//          registerView("a")
-//            .query(Seq((1, 2), (2, 3)).toDF("x", "y"))
-//          registerTable("b")
-//            .query(read("a").select("x"))
-//        }
-//      )
-//      val (graph, _, _) = executeInitializingStage(rawGraph)
-//      val deltaLog = DeltaLog.forTable(spark, graph.tableByName(materializationName("b")).path)
-//      val (refreshSelection, fullRefreshSelection) = if (isFullRefresh) {
-//        (NoTables, AllTables)
-//      } else {
-//        (AllTables, NoTables)
-//      }
-//      // Make sure to keep the same storage root when updating the UpdateContext
-//      updatePipelineUpdateContext(
-//        _.copy(
-//          refreshTables = refreshSelection,
-//          fullRefreshTables = fullRefreshSelection,
-//          inputStorageRoot = Option(updateContext.storageRoot)
-//        )
-//      )
-//      materializeGraph(rawGraph)
-//
-//      assert(deltaLog.startTransaction().metadata.schema == new StructType().add("x", IntegerType))
-//
-//      materializeGraph(
-//        DataflowGraph(
-//          new TestGraphRegistrationContext(spark) {
-//            registerView("a")
-//              .query(Seq((1, 2), (2, 3)).toDF("x", "y"))
-//            registerTable("b")
-//              .query(read("a").select("y"))
-//          }
-//        )
-//      )
-//      assert(deltaLog.startTransaction().metadata.schema == new StructType().add("y", IntegerType))
-//    }
-//  }
-//
-//  for (isFullRefresh <- Seq(true, false)) {
-//    test(
-//      s"Incremental tables should evolve schema only if not full refresh = $isFullRefresh"
-//    ) {
-//      val streamInts = MemoryStream[Int]
-//      streamInts.addData(1 until 5: _*)
-//
-//      val rawGraph = DataflowGraph(
-//        new TestGraphRegistrationContext(spark) {
-//          registerView("a")
-//            .query(streamInts.toDF())
-//          registerTable("b")
-//            .query(readStream("a").toDF("x"))
-//        }
-//      )
-//
-//      val (graph, _, _) = executeInitializingStage(rawGraph)
-//      val deltaLog = DeltaLog.forTable(spark, graph.tableByName(materializationName("b")).path)
-//      val (refreshSelection, fullRefreshSelection) = if (isFullRefresh) {
-//        (NoTables, AllTables)
-//      } else {
-//        (AllTables, NoTables)
-//      }
-//      // Make sure to keep the same storage root when updating the UpdateContext
-//      updatePipelineUpdateContext(
-//        _.copy(
-//          refreshTables = refreshSelection,
-//          fullRefreshTables = fullRefreshSelection,
-//          inputStorageRoot = Option(updateContext.storageRoot)
-//        )
-//      )
-//      materializeGraph(rawGraph)
-//      assert(deltaLog.startTransaction().metadata.schema == new StructType().add("x", IntegerType))
-//
-//      materializeGraph(
-//        DataflowGraph(
-//          new TestGraphRegistrationContext(spark) {
-//            registerView("a")
-//              .query(streamInts.toDF())
-//            registerTable("b")
-//              .query(readStream("a").toDF("y"))
-//          }
-//        )
-//      )
-//
-//      if (isFullRefresh) {
-//        assert(
-//          deltaLog.startTransaction().metadata.schema == new StructType().add("y", IntegerType)
-//        )
-//      } else {
-//        assert(
-//          deltaLog.startTransaction().metadata.schema == new StructType()
-//            .add("x", IntegerType)
-//            .add("y", IntegerType)
-//        )
-//      }
-//    }
-//  }
-//
-//  test(
-//    "materialize only selected tables"
-//  ) {
-//    updatePipelineUpdateContext(
-//      _.copy(
-//        refreshTables = SomeTables(Set(TableIdentifier("a"))),
-//        fullRefreshTables = SomeTables(Set(TableIdentifier("c")))
-//      )
-//    )
-//    val graph =
-//      materializeGraph(
-//        DataflowGraph(
-//          new TestGraphRegistrationContext(spark) {
-//            registerTable("a")
-//              .query(Seq((1, 2), (2, 3)).toDF("x", "y"))
-//            registerTable("b")
-//              .query(read("a").select("x"))
-//            registerTable("c")
-//              .query(read("a").select("y"))
-//          }
-//        )
-//      )
-//    val deltaLogA = DeltaLog.forTable(spark, graph.tableByName(materializationName("a")).path)
-//    val deltaLogB = DeltaLog.forTable(spark, graph.tableByName(materializationName("b")).path)
-//    val deltaLogC = DeltaLog.forTable(spark, graph.tableByName(materializationName("c")).path)
-//
-//    val snapshotA = deltaLogA.snapshot
-//    assert(snapshotA.version == 0)
-//    assert(
-//      deltaLogA.startTransaction().metadata.schema == new StructType()
-//        .add("x", IntegerType)
-//        .add("y", IntegerType)
-//    )
-//
-//    val snapshotB = deltaLogB.snapshot
-//    assert(snapshotB.version < 0)
-//    assert(deltaLogB.startTransaction().metadata.schema == new StructType())
-//
-//    val snapshotC = deltaLogC.snapshot
-//    assert(snapshotC.version == 0)
-//    assert(deltaLogC.startTransaction().metadata.schema == new StructType().add("y", IntegerType))
-//  }
-//
-//  test("tables with arrays and maps") {
-//    val rawGraph = DataflowGraph(
-//      new TestGraphRegistrationContext(spark) {
-//        registerTable("a")
-//          .query(sql("select map(1, struct('a', 'b')) m"))
-//        registerTable("b")
-//          .query(Seq(Array(1, 3, 5), Array(2, 4, 6)).toDF("arr"))
-//        registerTable("c")
-//          .query(read("a").join(read("b")).where("map_entries(m)[0].key = arr[0]"))
-//      }
-//    )
-//    val graph = materializeGraph(rawGraph)
-//    val deltaLogA = DeltaLog.forTable(spark, graph.tableByName(materializationName("a")).path)
-//    val deltaLogB = DeltaLog.forTable(spark, graph.tableByName(materializationName("b")).path)
-//    val deltaLogC = DeltaLog.forTable(spark, graph.tableByName(materializationName("c")).path)
-//
-//    // Materialize twice because some logic compares the incoming schema with the previous one.
-//    materializeGraph(rawGraph)
-//
-//    assert(
-//      deltaLogA.snapshot.schema ==
-//        StructType.fromDDL("m MAP<int, struct<col1: string, col2: string>>")
-//    )
-//    assert(deltaLogB.snapshot.schema == StructType.fromDDL("arr ARRAY<int>"))
-//    assert(
-//      deltaLogC.snapshot.schema ==
-//        StructType.fromDDL("m MAP<int, struct<col1: string, col2: string>>, arr ARRAY<int>")
-//    )
-//  }
-//
-//  test("tables with nested arrays and maps") {
-//    val rawGraph = DataflowGraph(
-//      new TestGraphRegistrationContext(spark) {
-//        registerTable("a")
-//          .query(sql("select map(0, map(0, struct('a', 'b'))) m"))
-//        registerTable("b")
-//          .query(sql("select array(array('a', 'b', 'c'), array('d', 'e', 'f')) arr"))
-//        registerTable("c")
-//          .query(read("a").join(read("b")).where("m[0][0].col1 = arr[0][0]"))
-//      }
-//    )
-//    val graph = materializeGraph(rawGraph)
-//    val deltaLogA = DeltaLog.forTable(spark, graph.tableByName(materializationName("a")).path)
-//    val deltaLogB = DeltaLog.forTable(spark, graph.tableByName(materializationName("b")).path)
-//    val deltaLogC = DeltaLog.forTable(spark, graph.tableByName(materializationName("c")).path)
-//
-//    // Materialize twice because some logic compares the incoming schema with the previous one.
-//    materializeGraph(rawGraph)
-//
-//    assert(
-//      deltaLogA.snapshot.schema ==
-//        StructType.fromDDL("m MAP<int, MAP<int, struct<col1: string, col2: string>>>")
-//    )
-//    assert(deltaLogB.snapshot.schema == StructType.fromDDL("arr ARRAY<ARRAY<string>>"))
-//    assert(
-//      deltaLogC.snapshot.schema ==
-//        StructType.fromDDL(
-//          "m MAP<int, MAP<int, struct<col1: string, col2: string>>>, arr ARRAY<ARRAY<string>>"
-//        )
-//    )
-//  }
-//
-//  test("materializing no tables doesn't throw") {
-//    val graph1 =
-//      DataflowGraph(flows = Seq.empty, tables = Seq.empty, sinks = Seq.empty, views = Seq.empty)
-//    val graph2 = DataflowGraph(
-//      flows = Seq(
-//       registerFlow(
-//          identifier = TableIdentifier("a"),
-//          destinationIdentifier = TableIdentifier("a"),
-//          currentCatalog = catalogInPipelineSpec,
-//          query = dfFlowFunc(Seq((1, 1), (2, 3)).toDF("x", "x2"))
-//        )
-//      ),
-//      tables = Seq(Table(identifier = TableIdentifier("a"), pipeline = dummyPipeline)),
-//      views = Seq.empty
-//    )
-//
-//    materializeGraph(graph1)
-//    updatePipelineUpdateContext(_.copy(refreshTables = NoTables, fullRefreshTables = NoTables))
-//    materializeGraph(graph2)
-//  }
-//
-//  test("Complex data type columns cannot be used as partition columns") {
-//    val ex = intercept[TableMaterializationException] {
-//      materializeGraph(
-//        DataflowGraph(new TestGraphRegistrationContext(spark) {
-//          registerTable("tgt")
-//            .schema("a LONG, `b.c` STRING, b STRUCT<c: INT>")
-//            .partitionBy("b")
-//            .query(spark.range(5).selectExpr("1L a", "'text' `b.c`", "named_struct('c', 1) b"))
-//        })
-//      )
-//    }
-//    val cause = ex.cause.asInstanceOf[AnalysisException]
-//    // The error messages in different DBRs are slightly different
-//    assert(
-//      cause.getErrorClass == "DELTA_INVALID_PARTITION_COLUMN_TYPE" ||
-//        cause.getErrorClass == "INVALID_PARTITION_COLUMN_DATA_TYPE"
-//    )
-//    val exStr = exceptionString(cause)
-//    assert(
-//      exStr.contains("Cannot use \"STRUCT<c: INT>\" for partition column") ||
-//        exStr.contains("partition column is not supported")
-//    )
-//  }
-//  scalastyle:on
+  test("specifying partition column different from existing partitioned table") {
+    sql(
+      s"CREATE TABLE ${TestGraphRegistrationContext.DEFAULT_DATABASE}.t8(x BOOLEAN, y INT) " +
+      s"PARTITIONED BY (x)"
+    )
+    Seq((true, 1), (false, 1)).toDF("x", "y").write.mode("append").saveAsTable("t8")
+
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+    val identifier = Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "t8")
+
+    // Specify a different partition column. Should throw.
+    val graph = new TestGraphRegistrationContext(spark) {
+      registerFlow(
+        "t8",
+        "t8",
+        query = dfFlowFunc(Seq((true, 1), (false, 3)).toDF("x", "y"))
+      )
+      registerTable("t8", partitionCols = Option(Seq("y")))
+    }.resolveToDataflowGraph()
+
+    val ex = intercept[TableMaterializationException] {
+      materializeGraph(graph)
+    }
+    assert(ex.cause.asInstanceOf[SparkThrowable].getCondition == "CANNOT_UPDATE_PARTITION_COLUMNS")
+    val table = catalog.loadTable(identifier)
+    assert(table.partitioning().toSeq == Seq(Expressions.identity("x")))
+  }
+
+  test("Table properties are set when table gets materialized") {
+    materializeGraph(
+      new TestGraphRegistrationContext(spark) {
+        registerTable(
+          "a",
+          query = Option(dfFlowFunc(spark.readStream.format("rate").load())),
+          properties = Map(
+            "pipelines.reset.allowed" -> "true",
+            "some.prop" -> "foo"
+          )
+        )
+        registerTable(
+          "b",
+          query = Option(sqlFlowFunc(spark, "SELECT * FROM STREAM a")),
+          properties = Map("pipelines.reset.alloweD" -> "true", "some.prop" -> "foo")
+        )
+      }.resolveToDataflowGraph()
+    )
+
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+    val identifierA = Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "a")
+    val identifierB = Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "b")
+    val tableA = catalog.loadTable(identifierA)
+    val tableB = catalog.loadTable(identifierB)
+
+    val expectedProps = Map(
+      "pipelines.reset.allowed" -> "true",
+      "some.prop" -> "foo"
+    )
+
+    assert(expectedProps.forall { case (k, v) => tableA.properties().asScala.get(k).contains(v) })
+    assert(expectedProps.forall { case (k, v) => tableB.properties().asScala.get(k).contains(v) })
+  }
+
+  test("Invalid table properties error during table materialization") {
+    // Invalid pipelines property
+    val graph1 =
+      new TestGraphRegistrationContext(spark) {
+        registerTable(
+          "a",
+          query = Option(dfFlowFunc(Seq(1).toDF())),
+          properties = Map("pipelines.reset.allowed" -> "123")
+        )
+      }.resolveToDataflowGraph()
+    val ex1 =
+      intercept[TableMaterializationException] {
+        materializeGraph(graph1)
+      }
+
+    assert(ex1.cause.isInstanceOf[IllegalArgumentException])
+    assert(ex1.cause.getMessage.contains("pipelines.reset.allowed"))
+  }
+
+  test(
+    "Materialization succeeds even if there are unknown pipeline properties on the existing table"
+  ) {
+    sql(
+      s"CREATE TABLE ${TestGraphRegistrationContext.DEFAULT_DATABASE}.t9(x INT) " +
+      s"TBLPROPERTIES ('pipelines.someProperty' = 'foo')"
+    )
+
+    val graph1 = new TestGraphRegistrationContext(spark) {
+      registerTable("a", query = Option(dfFlowFunc(spark.readStream.format("rate").load())))
+    }.resolveToDataflowGraph().validate()
+
+    materializeGraph(graph1)
+  }
+
+  for (isFullRefresh <- Seq(true, false)) {
+    test(
+      s"Complete tables should not evolve schema - isFullRefresh = $isFullRefresh"
+    ) {
+      val rawGraph =
+        new TestGraphRegistrationContext(spark) {
+          registerView("a", query = dfFlowFunc(Seq((1, 2), (2, 3)).toDF("x", "y")))
+          registerTable("b", query = Option(sqlFlowFunc(spark, "SELECT x FROM a")))
+        }.resolveToDataflowGraph()
+
+      val graph = materializeGraph(rawGraph)
+      val (refreshSelection, fullRefreshSelection) = if (isFullRefresh) {
+        (NoTables, AllTables)
+      } else {
+        (AllTables, NoTables)
+      }
+
+      materializeGraph(
+        rawGraph,
+        contextOpt = Option(
+          TestPipelineUpdateContext(
+            spark = spark,
+            unresolvedGraph = graph,
+            refreshTables = refreshSelection,
+            fullRefreshTables = fullRefreshSelection
+          )
+        )
+      )
+
+      val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+      val identifier = Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "b")
+
+      val table = catalog.loadTable(identifier)
+      assert(table.schema == new StructType().add("x", IntegerType))
+
+      materializeGraph(
+        new TestGraphRegistrationContext(spark) {
+          registerView("a", query = dfFlowFunc(Seq((1, 2), (2, 3)).toDF("x", "y")))
+          registerTable("b", query = Option(sqlFlowFunc(spark, "SELECT y FROM a")))
+        }.resolveToDataflowGraph()
+      )
+      val table2 = catalog.loadTable(identifier)
+      assert(table2.schema == new StructType().add("y", IntegerType))
+    }
+  }
+
+  for (isFullRefresh <- Seq(true, false)) {
+    test(
+      s"Streaming tables should evolve schema only if not full refresh = $isFullRefresh"
+    ) {
+      val streamInts = MemoryStream[Int]
+      streamInts.addData(1 until 5: _*)
+
+      val graph =
+        new TestGraphRegistrationContext(spark) {
+          registerView("a", query = dfFlowFunc(streamInts.toDF()))
+          registerTable("b", query = Option(sqlFlowFunc(spark, "SELECT value AS x FROM STREAM a")))
+        }.resolveToDataflowGraph().validate()
+
+      val (refreshSelection, fullRefreshSelection) = if (isFullRefresh) {
+        (NoTables, AllTables)
+      } else {
+        (AllTables, NoTables)
+      }
+      val updateContextOpt = Option(
+        TestPipelineUpdateContext(
+          spark = spark,
+          unresolvedGraph = graph,
+          refreshTables = refreshSelection,
+          fullRefreshTables = fullRefreshSelection
+        )
+      )
+      materializeGraph(graph, contextOpt = updateContextOpt)
+
+      val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+      val identifier = Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "b")
+      val table = catalog.loadTable(identifier)
+      assert(table.schema == new StructType().add("x", IntegerType))
+
+      materializeGraph(
+        new TestGraphRegistrationContext(spark) {
+          registerView("a", query = dfFlowFunc(streamInts.toDF()))
+          registerTable("b", query = Option(sqlFlowFunc(spark, "SELECT value AS y FROM STREAM a")))
+        }.resolveToDataflowGraph().validate(),
+        contextOpt = updateContextOpt
+      )
+
+      val table2 = catalog.loadTable(identifier)
+
+      if (isFullRefresh) {
+        assert(
+          table2.schema == new StructType().add("y", IntegerType)
+        )
+      } else {
+        assert(
+          table2.schema == new StructType()
+            .add("x", IntegerType)
+            .add("y", IntegerType)
+        )
+      }
+    }
+  }
+
+  test(
+    "materialize only selected tables"
+  ) {
+    val graph = new TestGraphRegistrationContext(spark) {
+      registerTable("a", query = Option(dfFlowFunc(Seq((1, 2), (2, 3)).toDF("x", "y"))))
+      registerTable("b", query = Option(sqlFlowFunc(spark, "SELECT x FROM a")))
+      registerTable("c", query = Option(sqlFlowFunc(spark, "SELECT y FROM a")))
+    }.resolveToDataflowGraph()
+    materializeGraph(
+      graph,
+      contextOpt = Option(
+        TestPipelineUpdateContext(
+          spark = spark,
+          unresolvedGraph = graph,
+          refreshTables = SomeTables(Set(fullyQualifiedIdentifier("a"))),
+          fullRefreshTables = SomeTables(Set(fullyQualifiedIdentifier("c")))
+        )
+      )
+    )
+
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+
+    val tableA =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "a"))
+    assert(
+      !catalog.tableExists(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "b"))
+    )
+    val tableC =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "c"))
+
+    assert(
+      tableA.schema == new StructType()
+        .add("x", IntegerType)
+        .add("y", IntegerType)
+    )
+
+    assert(tableC.schema == new StructType().add("y", IntegerType))
+  }
+
+  test("tables with arrays and maps") {
+    val rawGraph =
+      new TestGraphRegistrationContext(spark) {
+        registerTable("a", query = Option(sqlFlowFunc(spark, "select map(1, struct('a', 'b')) m")))
+        registerTable(
+          "b",
+          query = Option(dfFlowFunc(Seq(Array(1, 3, 5), Array(2, 4, 6)).toDF("arr")))
+        )
+        registerTable(
+          "c",
+          query = Option(
+            sqlFlowFunc(spark, "select * from a join b where map_entries(m)[0].key = arr[0]")
+          )
+        )
+      }.resolveToDataflowGraph()
+    materializeGraph(rawGraph)
+    // Materialize twice because some logic compares the incoming schema with the previous one.
+    materializeGraph(rawGraph)
+
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+    val tableA =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "a"))
+    val tableB =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "b"))
+    val tableC =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "c"))
+
+    assert(
+      tableA.schema ==
+      StructType.fromDDL("m MAP<int, struct<col1: string, col2: string>>")
+    )
+    assert(tableB.schema == StructType.fromDDL("arr ARRAY<int>"))
+    assert(
+      tableC.schema ==
+      StructType.fromDDL("m MAP<int, struct<col1: string, col2: string>>, arr ARRAY<int>")
+    )
+  }
+
+  test("tables with nested arrays and maps") {
+    val rawGraph =
+      new TestGraphRegistrationContext(spark) {
+        registerTable(
+          "a",
+          query = Option(sqlFlowFunc(spark, "select map(0, map(0, struct('a', 'b'))) m"))
+        )
+        registerTable(
+          "b",
+          query = Option(
+            sqlFlowFunc(spark, "select array(array('a', 'b', 'c'), array('d', 'e', 'f')) arr")
+          )
+        )
+        registerTable(
+          "c",
+          query =
+            Option(sqlFlowFunc(spark, "select * from a join b where m[0][0].col1 = arr[0][0]"))
+        )
+
+      }.resolveToDataflowGraph()
+    materializeGraph(rawGraph)
+    // Materialize twice because some logic compares the incoming schema with the previous one.
+    materializeGraph(rawGraph)
+    val catalog = spark.sessionState.catalogManager.currentCatalog.asInstanceOf[TableCatalog]
+    val tableA =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "a"))
+    val tableB =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "b"))
+    val tableC =
+      catalog.loadTable(Identifier.of(Array(TestGraphRegistrationContext.DEFAULT_DATABASE), "c"))
+
+    assert(
+      tableA.schema ==
+      StructType.fromDDL("m MAP<int, MAP<int, struct<col1: string, col2: string>>>")
+    )
+    assert(tableB.schema == StructType.fromDDL("arr ARRAY<ARRAY<string>>"))
+    assert(
+      tableC.schema ==
+      StructType.fromDDL(
+        "m MAP<int, MAP<int, struct<col1: string, col2: string>>>, arr ARRAY<ARRAY<string>>"
+      )
+    )
+  }
+
+  test("materializing no tables doesn't throw") {
+    val graph1 =
+      new DataflowGraph(flows = Seq.empty, tables = Seq.empty, views = Seq.empty)
+    val graph2 = new TestGraphRegistrationContext(spark) {
+      registerFlow(
+        "a",
+        "a",
+        query = dfFlowFunc(Seq((1, 1), (2, 3)).toDF("x", "x2"))
+      )
+      registerTable("a")
+    }.resolveToDataflowGraph()
+
+    materializeGraph(graph1)
+    materializeGraph(
+      graph2,
+      contextOpt = Option(
+        TestPipelineUpdateContext(
+          spark = spark,
+          unresolvedGraph = graph2,
+          refreshTables = NoTables,
+          fullRefreshTables = NoTables
+        )
+      )
+    )
+  }
 }
