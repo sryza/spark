@@ -86,12 +86,12 @@ trait GraphValidations extends Logging {
    * Validate that all tables are resettable. This is a best-effort check that will only catch
    * upstream tables that are resettable but have a non-resettable downstream dependency.
    */
-  protected def validateTablesAreResettable(): Seq[GraphValidationWarning] = {
+  protected def validateTablesAreResettable(): Unit = {
     validateTablesAreResettable(tables)
   }
 
   /** Validate that all specified tables are resettable. */
-  protected def validateTablesAreResettable(tables: Seq[Table]): Seq[GraphValidationWarning] = {
+  protected def validateTablesAreResettable(tables: Seq[Table]): Unit = {
     val tableLookup = mapUnique(tables, "table")(_.identifier)
     val nonResettableTables =
       tables.filter(t => !PipelinesTableProperties.resetAllowed.fromMap(t.properties))
@@ -120,28 +120,19 @@ trait GraphValidations extends Logging {
       .reverse
       .map {
         case (nameForEvent, tables) =>
-          InvalidResettableDependencyException(nameForEvent, tables)
+          throw new AnalysisException(
+            "INVALID_RESETTABLE_DEPENDENCY",
+            Map(
+              "downstreamTable" -> nameForEvent,
+              "upstreamResettableTables" -> tables
+                .map(_.displayName)
+                .sorted
+                .map(t => s"'$t'")
+                .mkString(", "),
+              "resetAllowedKey" -> PipelinesTableProperties.resetAllowed.key
+            )
+          )
       }
-  }
-
-  /**
-   * Validate if we have any append only flows writing into a streaming table but was created
-   * from a batch query.
-   */
-  protected def validateAppendOnceFlows(): Seq[GraphValidationWarning] = {
-    flows
-      .filter {
-        case af: AppendOnceFlow => !af.definedAsOnce
-        case _ => false
-      }
-      .groupBy(_.destinationIdentifier)
-      .flatMap {
-        case (destination, flows) =>
-          table
-            .get(destination)
-            .map(t => AppendOnceFlowCreatedFromBatchQueryException(t, flows.map(_.identifier)))
-      }
-      .toSeq
   }
 
   protected def validateUserSpecifiedSchemas(): Unit = {
