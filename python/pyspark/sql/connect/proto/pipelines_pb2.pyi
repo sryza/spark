@@ -669,12 +669,82 @@ class PipelineCommand(google.protobuf.message.Message):
             oneof_group: typing_extensions.Literal["_dataflow_graph_id", b"_dataflow_graph_id"],
         ) -> typing_extensions.Literal["dataflow_graph_id"] | None: ...
 
+    class GetResolvedDataflowGraph(google.protobuf.message.Message):
+        DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+        class Response(google.protobuf.message.Message):
+            DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+            FLOW_DEFINITIONS_FIELD_NUMBER: builtins.int
+            DATASET_DEFINITIONS_FIELD_NUMBER: builtins.int
+            @property
+            def flow_definitions(
+                self,
+            ) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[
+                global___ResolvedFlowDefinition
+            ]: ...
+            @property
+            def dataset_definitions(
+                self,
+            ) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[
+                global___DatasetDefinition
+            ]: ...
+            def __init__(
+                self,
+                *,
+                flow_definitions: collections.abc.Iterable[global___ResolvedFlowDefinition]
+                | None = ...,
+                dataset_definitions: collections.abc.Iterable[global___DatasetDefinition]
+                | None = ...,
+            ) -> None: ...
+            def ClearField(
+                self,
+                field_name: typing_extensions.Literal[
+                    "dataset_definitions",
+                    b"dataset_definitions",
+                    "flow_definitions",
+                    b"flow_definitions",
+                ],
+            ) -> None: ...
+
+        DATAFLOW_GRAPH_ID_FIELD_NUMBER: builtins.int
+        dataflow_graph_id: builtins.str
+        """The graph to resolve."""
+        def __init__(
+            self,
+            *,
+            dataflow_graph_id: builtins.str | None = ...,
+        ) -> None: ...
+        def HasField(
+            self,
+            field_name: typing_extensions.Literal[
+                "_dataflow_graph_id",
+                b"_dataflow_graph_id",
+                "dataflow_graph_id",
+                b"dataflow_graph_id",
+            ],
+        ) -> builtins.bool: ...
+        def ClearField(
+            self,
+            field_name: typing_extensions.Literal[
+                "_dataflow_graph_id",
+                b"_dataflow_graph_id",
+                "dataflow_graph_id",
+                b"dataflow_graph_id",
+            ],
+        ) -> None: ...
+        def WhichOneof(
+            self,
+            oneof_group: typing_extensions.Literal["_dataflow_graph_id", b"_dataflow_graph_id"],
+        ) -> typing_extensions.Literal["dataflow_graph_id"] | None: ...
+
     CREATE_DATAFLOW_GRAPH_FIELD_NUMBER: builtins.int
     DEFINE_DATASET_FIELD_NUMBER: builtins.int
     DEFINE_FLOW_FIELD_NUMBER: builtins.int
     DROP_DATAFLOW_GRAPH_FIELD_NUMBER: builtins.int
     START_RUN_FIELD_NUMBER: builtins.int
     DEFINE_SQL_GRAPH_ELEMENTS_FIELD_NUMBER: builtins.int
+    GET_RESOLVED_DATAFLOW_GRAPH_FIELD_NUMBER: builtins.int
     @property
     def create_dataflow_graph(self) -> global___PipelineCommand.CreateDataflowGraph: ...
     @property
@@ -687,6 +757,8 @@ class PipelineCommand(google.protobuf.message.Message):
     def start_run(self) -> global___PipelineCommand.StartRun: ...
     @property
     def define_sql_graph_elements(self) -> global___PipelineCommand.DefineSqlGraphElements: ...
+    @property
+    def get_resolved_dataflow_graph(self) -> global___PipelineCommand.GetResolvedDataflowGraph: ...
     def __init__(
         self,
         *,
@@ -696,6 +768,7 @@ class PipelineCommand(google.protobuf.message.Message):
         drop_dataflow_graph: global___PipelineCommand.DropDataflowGraph | None = ...,
         start_run: global___PipelineCommand.StartRun | None = ...,
         define_sql_graph_elements: global___PipelineCommand.DefineSqlGraphElements | None = ...,
+        get_resolved_dataflow_graph: global___PipelineCommand.GetResolvedDataflowGraph | None = ...,
     ) -> None: ...
     def HasField(
         self,
@@ -712,6 +785,8 @@ class PipelineCommand(google.protobuf.message.Message):
             b"define_sql_graph_elements",
             "drop_dataflow_graph",
             b"drop_dataflow_graph",
+            "get_resolved_dataflow_graph",
+            b"get_resolved_dataflow_graph",
             "start_run",
             b"start_run",
         ],
@@ -731,6 +806,8 @@ class PipelineCommand(google.protobuf.message.Message):
             b"define_sql_graph_elements",
             "drop_dataflow_graph",
             b"drop_dataflow_graph",
+            "get_resolved_dataflow_graph",
+            b"get_resolved_dataflow_graph",
             "start_run",
             b"start_run",
         ],
@@ -745,6 +822,7 @@ class PipelineCommand(google.protobuf.message.Message):
             "drop_dataflow_graph",
             "start_run",
             "define_sql_graph_elements",
+            "get_resolved_dataflow_graph",
         ]
         | None
     ): ...
@@ -791,14 +869,21 @@ class PipelineCommandResult(google.protobuf.message.Message):
         ) -> typing_extensions.Literal["dataflow_graph_id"] | None: ...
 
     CREATE_DATAFLOW_GRAPH_RESULT_FIELD_NUMBER: builtins.int
+    GET_RESOLVED_DATAFLOW_GRAPH_RESULT_FIELD_NUMBER: builtins.int
     @property
     def create_dataflow_graph_result(
         self,
     ) -> global___PipelineCommandResult.CreateDataflowGraphResult: ...
+    @property
+    def get_resolved_dataflow_graph_result(
+        self,
+    ) -> global___PipelineCommand.GetResolvedDataflowGraph.Response: ...
     def __init__(
         self,
         *,
         create_dataflow_graph_result: global___PipelineCommandResult.CreateDataflowGraphResult
+        | None = ...,
+        get_resolved_dataflow_graph_result: global___PipelineCommand.GetResolvedDataflowGraph.Response
         | None = ...,
     ) -> None: ...
     def HasField(
@@ -806,6 +891,8 @@ class PipelineCommandResult(google.protobuf.message.Message):
         field_name: typing_extensions.Literal[
             "create_dataflow_graph_result",
             b"create_dataflow_graph_result",
+            "get_resolved_dataflow_graph_result",
+            b"get_resolved_dataflow_graph_result",
             "result_type",
             b"result_type",
         ],
@@ -815,13 +902,20 @@ class PipelineCommandResult(google.protobuf.message.Message):
         field_name: typing_extensions.Literal[
             "create_dataflow_graph_result",
             b"create_dataflow_graph_result",
+            "get_resolved_dataflow_graph_result",
+            b"get_resolved_dataflow_graph_result",
             "result_type",
             b"result_type",
         ],
     ) -> None: ...
     def WhichOneof(
         self, oneof_group: typing_extensions.Literal["result_type", b"result_type"]
-    ) -> typing_extensions.Literal["create_dataflow_graph_result"] | None: ...
+    ) -> (
+        typing_extensions.Literal[
+            "create_dataflow_graph_result", "get_resolved_dataflow_graph_result"
+        ]
+        | None
+    ): ...
 
 global___PipelineCommandResult = PipelineCommandResult
 
@@ -932,3 +1026,112 @@ class SourceCodeLocation(google.protobuf.message.Message):
     ) -> typing_extensions.Literal["line_number"] | None: ...
 
 global___SourceCodeLocation = SourceCodeLocation
+
+class ResolvedFlowDefinition(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    FLOW_NAME_FIELD_NUMBER: builtins.int
+    TARGET_DATASET_NAME_FIELD_NUMBER: builtins.int
+    INPUT_DATASET_NAMES_FIELD_NUMBER: builtins.int
+    flow_name: builtins.str
+    target_dataset_name: builtins.str
+    @property
+    def input_dataset_names(
+        self,
+    ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]: ...
+    def __init__(
+        self,
+        *,
+        flow_name: builtins.str | None = ...,
+        target_dataset_name: builtins.str | None = ...,
+        input_dataset_names: collections.abc.Iterable[builtins.str] | None = ...,
+    ) -> None: ...
+    def HasField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_flow_name",
+            b"_flow_name",
+            "_target_dataset_name",
+            b"_target_dataset_name",
+            "flow_name",
+            b"flow_name",
+            "target_dataset_name",
+            b"target_dataset_name",
+        ],
+    ) -> builtins.bool: ...
+    def ClearField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_flow_name",
+            b"_flow_name",
+            "_target_dataset_name",
+            b"_target_dataset_name",
+            "flow_name",
+            b"flow_name",
+            "input_dataset_names",
+            b"input_dataset_names",
+            "target_dataset_name",
+            b"target_dataset_name",
+        ],
+    ) -> None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["_flow_name", b"_flow_name"]
+    ) -> typing_extensions.Literal["flow_name"] | None: ...
+    @typing.overload
+    def WhichOneof(
+        self,
+        oneof_group: typing_extensions.Literal["_target_dataset_name", b"_target_dataset_name"],
+    ) -> typing_extensions.Literal["target_dataset_name"] | None: ...
+
+global___ResolvedFlowDefinition = ResolvedFlowDefinition
+
+class DatasetDefinition(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    DATASET_NAME_FIELD_NUMBER: builtins.int
+    DATASET_TYPE_FIELD_NUMBER: builtins.int
+    dataset_name: builtins.str
+    dataset_type: global___DatasetType.ValueType
+    def __init__(
+        self,
+        *,
+        dataset_name: builtins.str | None = ...,
+        dataset_type: global___DatasetType.ValueType | None = ...,
+    ) -> None: ...
+    def HasField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_dataset_name",
+            b"_dataset_name",
+            "_dataset_type",
+            b"_dataset_type",
+            "dataset_name",
+            b"dataset_name",
+            "dataset_type",
+            b"dataset_type",
+        ],
+    ) -> builtins.bool: ...
+    def ClearField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_dataset_name",
+            b"_dataset_name",
+            "_dataset_type",
+            b"_dataset_type",
+            "dataset_name",
+            b"dataset_name",
+            "dataset_type",
+            b"dataset_type",
+        ],
+    ) -> None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["_dataset_name", b"_dataset_name"]
+    ) -> typing_extensions.Literal["dataset_name"] | None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["_dataset_type", b"_dataset_type"]
+    ) -> typing_extensions.Literal["dataset_type"] | None: ...
+
+global___DatasetDefinition = DatasetDefinition

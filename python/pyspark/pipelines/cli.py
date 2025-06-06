@@ -39,6 +39,7 @@ from pyspark.pipelines.graph_element_registry import (
 )
 from pyspark.pipelines.init_cli import init
 from pyspark.pipelines.logging_utils import log_with_curr_timestamp
+from pyspark.pipelines.show_cli import show_dataflow_graph
 from pyspark.pipelines.spark_connect_graph_element_registry import (
     SparkConnectGraphElementRegistry,
 )
@@ -238,6 +239,19 @@ def run(spec_path: Path) -> None:
         spark.stop()
 
 
+def _resolve_spec_path_from_arg(spec_arg: Optional[str]) -> Path:
+    if spec_arg is not None:
+        spec_path = Path(spec_arg)
+        if not spec_path.is_file():
+            raise PySparkException(
+                errorClass="PIPELINE_SPEC_FILE_DOES_NOT_EXIST",
+                messageParameters={"spec_path": spec_arg},
+            )
+        return spec_path
+    else:
+        return find_pipeline_spec(Path.cwd())
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipeline CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -258,20 +272,34 @@ if __name__ == "__main__":
         required=True,
     )
 
+    # "show-graph" subcommand
+    show_graph_parser = subparsers.add_parser(
+        "show-graph",
+        help="Display the dataflow graph for a pipeline.",
+    )
+    show_graph_parser.add_argument(
+        "--spec",
+        help="Path to the pipeline spec. If not provided, will look for a spec file in the current directory.",
+    )
+    show_graph_parser.add_argument(
+        "--save",
+        help="Path to save the graph visualization (e.g., 'graph.png', 'graph.pdf').",
+    )
+    show_graph_parser.add_argument(
+        "--imgcat",
+        help="Display the graph using imgcat in the terminal.",
+        action="store_true",
+    )
+
     args = parser.parse_args()
-    assert args.command in ["run", "init"]
+    assert args.command in ["run", "init", "show-graph"]
 
     if args.command == "run":
-        if args.spec is not None:
-            spec_path = Path(args.spec)
-            if not spec_path.is_file():
-                raise PySparkException(
-                    errorClass="PIPELINE_SPEC_FILE_DOES_NOT_EXIST",
-                    messageParameters={"spec_path": args.spec},
-                )
-        else:
-            spec_path = find_pipeline_spec(Path.cwd())
-
-        run(spec_path=spec_path)
+        run(spec_path=_resolve_spec_path_from_arg(args.spec))
     elif args.command == "init":
         init(args.name)
+    elif args.command == "show-graph":
+        spec_path = _resolve_spec_path_from_arg(args.spec)
+        show_dataflow_graph(
+            save=Path(args.save) if args.save else None, spec_path=spec_path, imgcat=args.imgcat
+        )
