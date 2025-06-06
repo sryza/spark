@@ -104,21 +104,10 @@ private[connect] object PipelinesHandler extends Logging {
       case proto.PipelineCommand.CommandTypeCase.GET_RESOLVED_DATAFLOW_GRAPH =>
         logInfo(s"Get resolved dataflow graph cmd received: $cmd")
         val response = handleGetResolvedDataflowGraph(cmd.getGetResolvedDataflowGraph)
-        // We need to send the response directly to the client
-        responseObserver.onNext(
-          ExecutePlanResponse
-            .newBuilder()
-            .setSessionId(sessionHolder.sessionId)
-            .setServerSideSessionId(sessionHolder.serverSessionId)
-            .setPipelineCommandResult(
-              PipelineCommandResult
-                .newBuilder()
-                .setGetResolvedDataflowGraphResult(response)
-                .build()
-            )
-            .build()
-        )
-        defaultResponse
+        PipelineCommandResult
+          .newBuilder()
+          .setGetResolvedDataflowGraphResult(response)
+          .build()
       case other => throw new UnsupportedOperationException(s"$other not supported")
     }
   }
@@ -400,8 +389,13 @@ private[connect] object PipelinesHandler extends Logging {
     val allDatasets = resolvedDataflowGraph.tables ++ resolvedDataflowGraph.views
     allDatasets.foreach { dataset =>
       val datasetType = dataset match {
-        case _: Table => proto.DatasetType.TABLE
-        case _: TemporaryView => proto.DatasetType.MATERIALIZED_VIEW
+        case t: Table =>
+          if (t.isStreamingTableOpt.get) {
+            proto.DatasetType.TABLE
+          } else {
+            proto.DatasetType.MATERIALIZED_VIEW
+          }
+        case _: TemporaryView => proto.DatasetType.TEMPORARY_VIEW
         case d => throw new IllegalStateException(s"Unknown dataset type ${d.getClass.getName}")
       }
 

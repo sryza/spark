@@ -227,7 +227,7 @@ class SparkDeclarativePipelinesServerSuite
         createView(name = "viewB", sql = "SELECT * FROM tableA")
         createTable(
           name = "tableC",
-          datasetType = DatasetType.TABLE,
+          datasetType = DatasetType.MATERIALIZED_VIEW,
           sql = Some("SELECT * FROM tableA, viewB")
         )
       }
@@ -256,20 +256,17 @@ class SparkDeclarativePipelinesServerSuite
       val flowDefs = result.getFlowDefinitionsList.asScala
       assert(flowDefs.size == 3, "Expected 3 flow definitions")
 
-      // Find tableC flow and verify its inputs
       val tableCFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.tableC").get
       assert(tableCFlow.getTargetDatasetName == "spark_catalog.default.tableC")
       val tableCInputs = tableCFlow.getInputDatasetNamesList.asScala.toSet
       assert(tableCInputs.contains("spark_catalog.default.tableA"))
       assert(tableCInputs.contains("viewB"))
 
-      // Find viewB flow and verify its inputs
       val viewBFlow = flowDefs.find(_.getFlowName == "viewB").get
       assert(viewBFlow.getTargetDatasetName == "viewB")
       val viewBInputs = viewBFlow.getInputDatasetNamesList.asScala.toSet
       assert(viewBInputs.contains("spark_catalog.default.tableA"))
 
-      // Find tableA flow and verify it has no inputs
       val tableAFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.tableA").get
       assert(tableAFlow.getTargetDatasetName == "spark_catalog.default.tableA")
       assert(tableAFlow.getInputDatasetNamesCount == 0)
@@ -278,17 +275,14 @@ class SparkDeclarativePipelinesServerSuite
       val datasetDefs = result.getDatasetDefinitionsList.asScala
       assert(datasetDefs.size == 3, "Expected 3 dataset definitions")
 
-      // Verify tableA dataset
       val tableADataset = datasetDefs.find(_.getDatasetName == "spark_catalog.default.tableA").get
       assert(tableADataset.getDatasetType == DatasetType.MATERIALIZED_VIEW)
 
-      // Verify viewB dataset
       val viewBDataset = datasetDefs.find(_.getDatasetName == "viewB").get
       assert(viewBDataset.getDatasetType == DatasetType.TEMPORARY_VIEW)
 
-      // Verify tableC dataset
       val tableCDataset = datasetDefs.find(_.getDatasetName == "spark_catalog.default.tableC").get
-      assert(tableCDataset.getDatasetType == DatasetType.TABLE)
+      assert(tableCDataset.getDatasetType == DatasetType.MATERIALIZED_VIEW)
     }
   }
 
@@ -318,12 +312,12 @@ class SparkDeclarativePipelinesServerSuite
         )
         createTable(
           name = "combined",
-          datasetType = DatasetType.TABLE,
+          datasetType = DatasetType.MATERIALIZED_VIEW,
           sql = Some("SELECT a.id FROM intermediate1 a JOIN intermediate2 b ON a.id = b.id")
         )
         createTable(
           name = "final",
-          datasetType = DatasetType.TABLE,
+          datasetType = DatasetType.MATERIALIZED_VIEW,
           sql = Some("SELECT * FROM combined UNION SELECT * FROM source1 WHERE id > 5")
         )
       }
@@ -345,36 +339,30 @@ class SparkDeclarativePipelinesServerSuite
         )
       )
 
-      // Verify the response contains the expected flow definitions and dataset definitions
       val result = response.getPipelineCommandResult.getGetResolvedDataflowGraphResult
 
       // Verify flow definitions
       val flowDefs = result.getFlowDefinitionsList.asScala
       assert(flowDefs.size == 6, "Expected 6 flow definitions")
 
-      // Verify the final table depends on combined and source1
       val finalFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.final").get
       val finalInputs = finalFlow.getInputDatasetNamesList.asScala.toSet
       assert(finalInputs.contains("spark_catalog.default.combined"))
       assert(finalInputs.contains("spark_catalog.default.source1"))
 
-      // Verify the combined table depends on both intermediate views
       val combinedFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.combined").get
       val combinedInputs = combinedFlow.getInputDatasetNamesList.asScala.toSet
       assert(combinedInputs.contains("intermediate1"))
       assert(combinedInputs.contains("intermediate2"))
 
-      // Verify intermediate1 depends on source1
       val int1Flow = flowDefs.find(_.getFlowName == "intermediate1").get
       val int1Inputs = int1Flow.getInputDatasetNamesList.asScala.toSet
       assert(int1Inputs.contains("spark_catalog.default.source1"))
 
-      // Verify intermediate2 depends on source2
       val int2Flow = flowDefs.find(_.getFlowName == "intermediate2").get
       val int2Inputs = int2Flow.getInputDatasetNamesList.asScala.toSet
       assert(int2Inputs.contains("spark_catalog.default.source2"))
 
-      // Verify source tables have no inputs
       val source1Flow = flowDefs.find(_.getFlowName == "spark_catalog.default.source1").get
       assert(source1Flow.getInputDatasetNamesCount == 0)
 
@@ -385,7 +373,6 @@ class SparkDeclarativePipelinesServerSuite
       val datasetDefs = result.getDatasetDefinitionsList.asScala
       assert(datasetDefs.size == 6, "Expected 6 dataset definitions")
 
-      // Verify dataset types
       assert(
         datasetDefs
           .find(_.getDatasetName == "spark_catalog.default.source1")
@@ -414,13 +401,13 @@ class SparkDeclarativePipelinesServerSuite
         datasetDefs
           .find(_.getDatasetName == "spark_catalog.default.combined")
           .get
-          .getDatasetType == DatasetType.TABLE
+          .getDatasetType == DatasetType.MATERIALIZED_VIEW
       )
       assert(
         datasetDefs
           .find(_.getDatasetName == "spark_catalog.default.final")
           .get
-          .getDatasetType == DatasetType.TABLE
+          .getDatasetType == DatasetType.MATERIALIZED_VIEW
       )
     }
   }
