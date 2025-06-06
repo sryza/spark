@@ -101,6 +101,24 @@ private[connect] object PipelinesHandler extends Logging {
         logInfo(s"Register sql datasets cmd received: $cmd")
         defineSqlGraphElements(cmd.getDefineSqlGraphElements, sparkSession)
         defaultResponse
+      case proto.PipelineCommand.CommandTypeCase.GET_RESOLVED_DATAFLOW_GRAPH =>
+        logInfo(s"Get resolved dataflow graph cmd received: $cmd")
+        val response = handleGetResolvedDataflowGraph(cmd.getGetResolvedDataflowGraph)
+        // We need to send the response directly to the client
+        responseObserver.onNext(
+          ExecutePlanResponse
+            .newBuilder()
+            .setSessionId(sessionHolder.sessionId)
+            .setServerSideSessionId(sessionHolder.serverSessionId)
+            .setPipelineCommandResult(
+              PipelineCommandResult
+                .newBuilder()
+                .setGetResolvedDataflowGraphResult(response)
+                .build()
+            )
+            .build()
+        )
+        defaultResponse
       case other => throw new UnsupportedOperationException(s"$other not supported")
     }
   }
@@ -351,5 +369,50 @@ private[connect] object PipelinesHandler extends Logging {
     runFailureEvent.foreach { event =>
       throw event.error.get
     }
+  }
+
+  private def handleGetResolvedDataflowGraph(cmd: proto.PipelineCommand.GetResolvedDataflowGraph)
+      : proto.PipelineCommand.GetResolvedDataflowGraph.Response = {
+    val dataflowGraphId = cmd.getDataflowGraphId
+    val graphElementRegistry = DataflowGraphRegistry.getDataflowGraphOrThrow(dataflowGraphId)
+
+    // Resolve the dataflow graph
+    val unresolvedDataflowGraph = graphElementRegistry.toDataflowGraph
+    val resolvedDataflowGraph = unresolvedDataflowGraph.resolve().validate()
+
+    // Build the response
+    val responseBuilder = proto.PipelineCommand.GetResolvedDataflowGraph.Response.newBuilder()
+
+    // Add resolved flow definitions
+    resolvedDataflowGraph.resolvedFlows.foreach { resolvedFlow =>
+      val flowDefBuilder = proto.ResolvedFlowDefinition
+        .newBuilder()
+        .setFlowName(resolvedFlow.identifier.unquotedString)
+        .setTargetDatasetName(resolvedFlow.destinationIdentifier.unquotedString)
+
+      // Add input dataset names - these are the datasets that this flow depends on
+      resolvedFlow.inputs.map(_.unquotedString).foreach(flowDefBuilder.addInputDatasetNames)
+
+      responseBuilder.addFlowDefinitions(flowDefBuilder.build())
+    }
+
+    // Add dataset definitions
+    val allDatasets = resolvedDataflowGraph.tables ++ resolvedDataflowGraph.views
+    allDatasets.foreach { dataset =>
+      val datasetType = dataset match {
+        case _: Table => proto.DatasetType.TABLE
+        case _: TemporaryView => proto.DatasetType.MATERIALIZED_VIEW
+        case d => throw new IllegalStateException(s"Unknown dataset type ${d.getClass.getName}")
+      }
+
+      val datasetDefBuilder = proto.DatasetDefinition
+        .newBuilder()
+        .setDatasetName(dataset.identifier.unquotedString)
+        .setDatasetType(datasetType)
+
+      responseBuilder.addDatasetDefinitions(datasetDefBuilder.build())
+    }
+
+    responseBuilder.build()
   }
 }

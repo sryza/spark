@@ -36,6 +36,7 @@ message PipelineCommand {
     DropDataflowGraph drop_dataflow_graph = 4;
     StartRun start_run = 5;
     DefineSqlGraphElements define_sql_graph_elements = 6;
+    GetResolvedDataflowGraph get_resolved_dataflow_graph = 7;
   }
 
   // Request to create a new dataflow graph.
@@ -135,12 +136,23 @@ message PipelineCommand {
     // The graph to start.
     optional string dataflow_graph_id = 1;
   }
+
+  message GetResolvedDataflowGraph {
+    // The graph to resolve.
+    optional string dataflow_graph_id = 1;
+
+    message Response {
+      repeated ResolvedFlowDefinition flow_definitions = 1;
+      repeated DatasetDefinition dataset_definitions = 2;
+    }
+  }
 }
 
 // Dispatch object for pipelines command results.
 message PipelineCommandResult {
   oneof result_type {
     CreateDataflowGraphResult create_dataflow_graph_result = 1;
+    PipelineCommand.GetResolvedDataflowGraph.Response get_resolved_dataflow_graph_result = 2;
   }
   message CreateDataflowGraphResult {
     // The ID of the created graph.
@@ -178,4 +190,15 @@ message SourceCodeLocation {
   optional string file_name = 1;
   // The specific line number that this pipeline source code is located at, if applicable.
   optional int32 line_number = 2;
+}
+
+message ResolvedFlowDefinition {
+  optional string flow_name = 1;
+  optional string target_dataset_name = 2;
+  repeated string input_dataset_names = 3;
+}
+
+message DatasetDefinition {
+  optional string dataset_name = 1;
+  optional DatasetType dataset_type = 2;
 }
