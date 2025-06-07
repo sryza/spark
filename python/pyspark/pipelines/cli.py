@@ -25,13 +25,10 @@ from contextlib import contextmanager
 import argparse
 import importlib.util
 import os
-import yaml
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Generator, Mapping, Optional, Sequence
+from typing import Generator, Optional, Tuple
 
-from pyspark.errors import PySparkException, PySparkTypeError
+from pyspark.errors import PySparkException
 from pyspark.sql import SparkSession
 from pyspark.pipelines.graph_element_registry import (
     graph_element_registration_context,
@@ -39,6 +36,7 @@ from pyspark.pipelines.graph_element_registry import (
 )
 from pyspark.pipelines.init_cli import init
 from pyspark.pipelines.logging_utils import log_with_curr_timestamp
+from pyspark.pipelines.pipeline_spec import PipelineSpec, load_pipeline_spec, find_pipeline_spec
 from pyspark.pipelines.show_cli import show_dataflow_graph
 from pyspark.pipelines.spark_connect_graph_element_registry import (
     SparkConnectGraphElementRegistry,
@@ -48,112 +46,6 @@ from pyspark.pipelines.spark_connect_pipeline import (
     start_run,
     handle_pipeline_events,
 )
-
-PIPELINE_SPEC_FILE_NAMES = ["pipeline.yaml", "pipeline.yml"]
-
-
-@dataclass(frozen=True)
-class DefinitionsGlob:
-    """A glob pattern for finding pipeline definitions files."""
-
-    include: str
-
-
-@dataclass(frozen=True)
-class PipelineSpec:
-    """Spec for a pipeline.
-
-    :param catalog: The default catalog to use for the pipeline.
-    :param database: The default database to use for the pipeline.
-    :param configuration: A dictionary of Spark configuration properties to set for the pipeline.
-    :param definitions: A list of glob patterns for finding pipeline definitions files.
-    """
-
-    catalog: Optional[str]
-    database: Optional[str]
-    configuration: Mapping[str, str]
-    definitions: Sequence[DefinitionsGlob]
-
-
-def find_pipeline_spec(current_dir: Path) -> Path:
-    """Looks in the current directory and its ancestors for a pipeline spec file."""
-    while True:
-        try:
-            candidates = [
-                current_dir / spec_file_name for spec_file_name in PIPELINE_SPEC_FILE_NAMES
-            ]
-            found_files = [candidate for candidate in candidates if candidate.is_file()]
-            if len(found_files) == 1:
-                return found_files[0]
-            elif len(found_files) > 1:
-                raise PySparkException(
-                    errorClass="MULTIPLE_PIPELINE_SPEC_FILES_FOUND",
-                    messageParameters={"dir_path": str(current_dir)},
-                )
-        except PermissionError:
-            raise PySparkException(
-                errorClass="PIPELINE_SPEC_FILE_NOT_FOUND",
-                messageParameters={"dir_path": str(current_dir)},
-            )
-
-        if current_dir.parent == current_dir or not current_dir.parent.exists():
-            raise PySparkException(
-                errorClass="PIPELINE_SPEC_FILE_NOT_FOUND",
-                messageParameters={"dir_path": str(current_dir)},
-            )
-
-        current_dir = current_dir.parent
-
-
-def load_pipeline_spec(spec_path: Path) -> PipelineSpec:
-    """Load the pipeline spec from a YAML file at the given path."""
-    with spec_path.open("r") as f:
-        return unpack_pipeline_spec(yaml.safe_load(f))
-
-
-def unpack_pipeline_spec(spec_data: Mapping[str, Any]) -> PipelineSpec:
-    for key in spec_data.keys():
-        if key not in ["catalog", "database", "schema", "configuration", "definitions"]:
-            raise PySparkException(
-                errorClass="PIPELINE_SPEC_UNEXPECTED_FIELD", messageParameters={"field_name": key}
-            )
-
-    return PipelineSpec(
-        catalog=spec_data.get("catalog"),
-        database=spec_data.get("database", spec_data.get("schema")),
-        configuration=validate_str_dict(spec_data.get("configuration", {}), "configuration"),
-        definitions=[
-            DefinitionsGlob(include=entry["glob"]["include"])
-            for entry in spec_data.get("definitions", [])
-        ],
-    )
-
-
-def validate_str_dict(d: Mapping[str, str], field_name: str) -> Mapping[str, str]:
-    """Raises an error if the dictionary is not a mapping of strings to strings."""
-    if not isinstance(d, dict):
-        raise PySparkTypeError(
-            errorClass="PIPELINE_SPEC_FIELD_NOT_DICT",
-            messageParameters={"field_name": field_name, "field_type": type(d).__name__},
-        )
-
-    for key, value in d.items():
-        if not isinstance(key, str):
-            raise PySparkTypeError(
-                errorClass="PIPELINE_SPEC_DICT_KEY_NOT_STRING",
-                messageParameters={"field_name": field_name, "key_type": type(key).__name__},
-            )
-        if not isinstance(value, str):
-            raise PySparkTypeError(
-                errorClass="PIPELINE_SPEC_DICT_VALUE_NOT_STRING",
-                messageParameters={
-                    "field_name": field_name,
-                    "key_name": key,
-                    "value_type": type(value).__name__,
-                },
-            )
-
-    return d
 
 
 def register_definitions(
@@ -207,8 +99,8 @@ def change_dir(path: Path) -> Generator[None, None, None]:
         os.chdir(prev)
 
 
-def run(spec_path: Path) -> None:
-    """Run the pipeline defined with the given spec."""
+def _register_dataflow_graph(spec_path: Path) -> Tuple[SparkSession, str]:
+    """Register a dataflow graph with the Spark session."""
     log_with_curr_timestamp(f"Loading pipeline spec from {spec_path}...")
     spec = load_pipeline_spec(spec_path)
 
@@ -230,6 +122,11 @@ def run(spec_path: Path) -> None:
     log_with_curr_timestamp("Registering graph elements...")
     registry = SparkConnectGraphElementRegistry(spark, dataflow_graph_id)
     register_definitions(spec_path, registry, spec)
+    return spark, dataflow_graph_id
+
+
+def run(spec_path: Path) -> None:
+    spark, dataflow_graph_id = _register_dataflow_graph(spec_path)
 
     log_with_curr_timestamp("Starting run...")
     result_iter = start_run(spark, dataflow_graph_id)
@@ -237,6 +134,11 @@ def run(spec_path: Path) -> None:
         handle_pipeline_events(result_iter)
     finally:
         spark.stop()
+
+
+def show_graph(save: Optional[Path], imgcat: bool, spec_path: Path) -> None:
+    spark, dataflow_graph_id = _register_dataflow_graph(spec_path)
+    show_dataflow_graph(save, imgcat, spark, dataflow_graph_id)
 
 
 def _resolve_spec_path_from_arg(spec_arg: Optional[str]) -> Path:
@@ -251,8 +153,7 @@ def _resolve_spec_path_from_arg(spec_arg: Optional[str]) -> Path:
     else:
         return find_pipeline_spec(Path.cwd())
 
-
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Pipeline CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -287,7 +188,7 @@ if __name__ == "__main__":
     )
     show_graph_parser.add_argument(
         "--imgcat",
-        help="Display the graph using imgcat in the terminal.",
+        help="Display the graph using imgcat in the terminal. Requires imgcat to be installed.",
         action="store_true",
     )
 
@@ -300,6 +201,9 @@ if __name__ == "__main__":
         init(args.name)
     elif args.command == "show-graph":
         spec_path = _resolve_spec_path_from_arg(args.spec)
-        show_dataflow_graph(
+        show_graph(
             save=Path(args.save) if args.save else None, spec_path=spec_path, imgcat=args.imgcat
         )
+
+if __name__ == "__main__":
+    main()

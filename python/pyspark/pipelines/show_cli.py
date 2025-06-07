@@ -20,11 +20,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
-from pyspark.pipelines.cli import load_pipeline_spec, register_definitions
-from pyspark.pipelines.spark_connect_graph_element_registry import (
-    SparkConnectGraphElementRegistry,
-)
-from pyspark.pipelines.spark_connect_pipeline import create_dataflow_graph
 import pyspark.sql.connect.proto as pb2
 from pyspark.sql import SparkSession
 from pyspark.errors import PySparkValueError
@@ -36,30 +31,11 @@ if TYPE_CHECKING:
         pass
 
 
-def show_dataflow_graph(save: Optional[Path], imgcat: bool, spec_path: Path) -> None:
+def show_dataflow_graph(
+    save: Optional[Path], imgcat: bool, spark: SparkSession, dataflow_graph_id: str
+) -> None:
     """Display dataflow graph or save its graphic representation to a file."""
-    spec = load_pipeline_spec(spec_path)
-
-    spark_builder = SparkSession.builder
-    for key, value in spec.configuration.items():
-        spark_builder = spark_builder.config(key, value)
-
-    spark = spark_builder.getOrCreate()
-
     try:
-        # Create dataflow graph
-        dataflow_graph_id = create_dataflow_graph(
-            spark,
-            default_catalog=spec.catalog,
-            default_database=spec.database,
-            sql_conf=spec.configuration,
-        )
-
-        # Register graph elements
-        registry = SparkConnectGraphElementRegistry(spark, dataflow_graph_id)
-        register_definitions(spec_path, registry, spec)
-
-        # Get the resolved dataflow graph
         dataflow_graph = _get_resolved_dataflow_graph(spark, dataflow_graph_id)
 
         # Render the graph
@@ -107,28 +83,29 @@ def _render_dataflow_graph(
         dot.attr(dpi="200")
         dot.attr(rankdir="TB")  # Top to bottom layout
 
-        def _flow_id(flow_name: str) -> str:
-            return f"flow|{flow_name}"
+        default_catalog = "spark_catalog"
+        default_database = "default"
 
-        def _dataset_id(dataset_name: str) -> str:
+        def _format_dataset_identifier(dataset_id: pb2.DatasetIdentifier) -> str:
+            """Format a DatasetIdentifier into a string representation."""
+            parts = []
+            if dataset_id.HasField("catalog_name") and dataset_id.catalog_name != default_catalog:
+                parts.append(dataset_id.catalog_name)
+            if dataset_id.namespace and ".".join(dataset_id.namespace) != default_database:
+                parts.extend(dataset_id.namespace)
+            parts.append(dataset_id.name)
+            return ".".join(parts)
+
+        def _dataset_id(dataset_id: pb2.DatasetIdentifier) -> str:
+            """Generate a unique ID for a dataset node in the graph."""
+            dataset_name = _format_dataset_identifier(dataset_id)
             return f"dataset|{dataset_name}"
-
-        # Add nodes for flow definitions
-        for flow_def in dataflow_graph.flow_definitions:
-            flow_name = flow_def.flow_name
-            dot.node(
-                _flow_id(flow_name),
-                label=flow_name,
-                shape="box",
-                style="filled",
-                fillcolor="lightblue",
-            )
 
         # Add nodes for dataset definitions
         for dataset_def in dataflow_graph.dataset_definitions:
-            dataset_name = dataset_def.dataset_name
+            dataset_name = _format_dataset_identifier(dataset_def.dataset_id)
             dot.node(
-                _dataset_id(dataset_name),
+                _dataset_id(dataset_def.dataset_id),
                 label=dataset_name,
                 shape="ellipse",
                 style="filled",
@@ -138,11 +115,8 @@ def _render_dataflow_graph(
         # Add edges between flows and datasets
         for flow_def in dataflow_graph.flow_definitions:
             # Add edges from input datasets to flow
-            for input_dataset in flow_def.input_dataset_names:
-                dot.edge(_dataset_id(input_dataset), _flow_id(flow_def.flow_name))
-
-            # Add edges from flow to output datasets
-            dot.edge(_flow_id(flow_def.flow_name), _dataset_id(flow_def.target_dataset_name))
+            for input_dataset_id in flow_def.input_dataset_ids:
+                dot.edge(_dataset_id(input_dataset_id), _dataset_id(flow_def.target_dataset_id))
 
         return dot
     except ImportError:

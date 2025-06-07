@@ -26,6 +26,7 @@ import org.apache.spark.connect.proto
 import org.apache.spark.connect.proto.{ExecutePlanResponse, PipelineCommandResult, Relation}
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.AnalysisException
+import org.apache.spark.sql.catalyst.TableIdentifier
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.classic.SparkSession
 import org.apache.spark.sql.connect.common.DataTypeProtoConverter
@@ -376,11 +377,13 @@ private[connect] object PipelinesHandler extends Logging {
     resolvedDataflowGraph.resolvedFlows.foreach { resolvedFlow =>
       val flowDefBuilder = proto.ResolvedFlowDefinition
         .newBuilder()
-        .setFlowName(resolvedFlow.identifier.unquotedString)
-        .setTargetDatasetName(resolvedFlow.destinationIdentifier.unquotedString)
+        .setFlowId(buildIdentifier(resolvedFlow.identifier))
+        .setTargetDatasetId(buildIdentifier(resolvedFlow.destinationIdentifier))
 
-      // Add input dataset names - these are the datasets that this flow depends on
-      resolvedFlow.inputs.map(_.unquotedString).foreach(flowDefBuilder.addInputDatasetNames)
+      // Add input dataset identifiers - these are the datasets that this flow depends on
+      resolvedFlow.inputs.foreach { inputIdentifier =>
+        flowDefBuilder.addInputDatasetIds(buildIdentifier(inputIdentifier))
+      }
 
       responseBuilder.addFlowDefinitions(flowDefBuilder.build())
     }
@@ -401,12 +404,20 @@ private[connect] object PipelinesHandler extends Logging {
 
       val datasetDefBuilder = proto.DatasetDefinition
         .newBuilder()
-        .setDatasetName(dataset.identifier.unquotedString)
+        .setDatasetId(buildIdentifier(dataset.identifier))
         .setDatasetType(datasetType)
 
       responseBuilder.addDatasetDefinitions(datasetDefBuilder.build())
     }
 
     responseBuilder.build()
+  }
+
+  private def buildIdentifier(identifier: TableIdentifier): proto.DatasetIdentifier = {
+    val builder = proto.DatasetIdentifier.newBuilder()
+    identifier.catalog.foreach(builder.setCatalogName)
+    identifier.database.foreach(builder.addNamespace)
+
+    builder.setName(identifier.table).build()
   }
 }

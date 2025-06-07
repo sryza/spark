@@ -1027,87 +1027,152 @@ class SourceCodeLocation(google.protobuf.message.Message):
 
 global___SourceCodeLocation = SourceCodeLocation
 
-class ResolvedFlowDefinition(google.protobuf.message.Message):
+class DatasetIdentifier(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
-    FLOW_NAME_FIELD_NUMBER: builtins.int
-    TARGET_DATASET_NAME_FIELD_NUMBER: builtins.int
-    INPUT_DATASET_NAMES_FIELD_NUMBER: builtins.int
-    flow_name: builtins.str
-    target_dataset_name: builtins.str
+    CATALOG_NAME_FIELD_NUMBER: builtins.int
+    NAMESPACE_FIELD_NUMBER: builtins.int
+    NAME_FIELD_NUMBER: builtins.int
+    catalog_name: builtins.str
+    """The catalog name."""
     @property
-    def input_dataset_names(
+    def namespace(
         self,
-    ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]: ...
+    ) -> google.protobuf.internal.containers.RepeatedScalarFieldContainer[builtins.str]:
+        """The namespace components."""
+    name: builtins.str
+    """The dataset name."""
     def __init__(
         self,
         *,
-        flow_name: builtins.str | None = ...,
-        target_dataset_name: builtins.str | None = ...,
-        input_dataset_names: collections.abc.Iterable[builtins.str] | None = ...,
+        catalog_name: builtins.str | None = ...,
+        namespace: collections.abc.Iterable[builtins.str] | None = ...,
+        name: builtins.str | None = ...,
     ) -> None: ...
     def HasField(
         self,
         field_name: typing_extensions.Literal[
-            "_flow_name",
-            b"_flow_name",
-            "_target_dataset_name",
-            b"_target_dataset_name",
-            "flow_name",
-            b"flow_name",
-            "target_dataset_name",
-            b"target_dataset_name",
+            "_catalog_name",
+            b"_catalog_name",
+            "_name",
+            b"_name",
+            "catalog_name",
+            b"catalog_name",
+            "name",
+            b"name",
         ],
     ) -> builtins.bool: ...
     def ClearField(
         self,
         field_name: typing_extensions.Literal[
-            "_flow_name",
-            b"_flow_name",
-            "_target_dataset_name",
-            b"_target_dataset_name",
-            "flow_name",
-            b"flow_name",
-            "input_dataset_names",
-            b"input_dataset_names",
-            "target_dataset_name",
-            b"target_dataset_name",
+            "_catalog_name",
+            b"_catalog_name",
+            "_name",
+            b"_name",
+            "catalog_name",
+            b"catalog_name",
+            "name",
+            b"name",
+            "namespace",
+            b"namespace",
         ],
     ) -> None: ...
     @typing.overload
     def WhichOneof(
-        self, oneof_group: typing_extensions.Literal["_flow_name", b"_flow_name"]
-    ) -> typing_extensions.Literal["flow_name"] | None: ...
+        self, oneof_group: typing_extensions.Literal["_catalog_name", b"_catalog_name"]
+    ) -> typing_extensions.Literal["catalog_name"] | None: ...
     @typing.overload
     def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["_name", b"_name"]
+    ) -> typing_extensions.Literal["name"] | None: ...
+
+global___DatasetIdentifier = DatasetIdentifier
+
+class ResolvedFlowDefinition(google.protobuf.message.Message):
+    DESCRIPTOR: google.protobuf.descriptor.Descriptor
+
+    FLOW_ID_FIELD_NUMBER: builtins.int
+    TARGET_DATASET_ID_FIELD_NUMBER: builtins.int
+    INPUT_DATASET_IDS_FIELD_NUMBER: builtins.int
+    @property
+    def flow_id(self) -> global___DatasetIdentifier: ...
+    @property
+    def target_dataset_id(self) -> global___DatasetIdentifier: ...
+    @property
+    def input_dataset_ids(
         self,
-        oneof_group: typing_extensions.Literal["_target_dataset_name", b"_target_dataset_name"],
-    ) -> typing_extensions.Literal["target_dataset_name"] | None: ...
+    ) -> google.protobuf.internal.containers.RepeatedCompositeFieldContainer[
+        global___DatasetIdentifier
+    ]: ...
+    def __init__(
+        self,
+        *,
+        flow_id: global___DatasetIdentifier | None = ...,
+        target_dataset_id: global___DatasetIdentifier | None = ...,
+        input_dataset_ids: collections.abc.Iterable[global___DatasetIdentifier] | None = ...,
+    ) -> None: ...
+    def HasField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_flow_id",
+            b"_flow_id",
+            "_target_dataset_id",
+            b"_target_dataset_id",
+            "flow_id",
+            b"flow_id",
+            "target_dataset_id",
+            b"target_dataset_id",
+        ],
+    ) -> builtins.bool: ...
+    def ClearField(
+        self,
+        field_name: typing_extensions.Literal[
+            "_flow_id",
+            b"_flow_id",
+            "_target_dataset_id",
+            b"_target_dataset_id",
+            "flow_id",
+            b"flow_id",
+            "input_dataset_ids",
+            b"input_dataset_ids",
+            "target_dataset_id",
+            b"target_dataset_id",
+        ],
+    ) -> None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["_flow_id", b"_flow_id"]
+    ) -> typing_extensions.Literal["flow_id"] | None: ...
+    @typing.overload
+    def WhichOneof(
+        self, oneof_group: typing_extensions.Literal["_target_dataset_id", b"_target_dataset_id"]
+    ) -> typing_extensions.Literal["target_dataset_id"] | None: ...
 
 global___ResolvedFlowDefinition = ResolvedFlowDefinition
 
 class DatasetDefinition(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
-    DATASET_NAME_FIELD_NUMBER: builtins.int
+    DATASET_ID_FIELD_NUMBER: builtins.int
     DATASET_TYPE_FIELD_NUMBER: builtins.int
-    dataset_name: builtins.str
+    @property
+    def dataset_id(self) -> global___DatasetIdentifier: ...
     dataset_type: global___DatasetType.ValueType
     def __init__(
         self,
         *,
-        dataset_name: builtins.str | None = ...,
+        dataset_id: global___DatasetIdentifier | None = ...,
         dataset_type: global___DatasetType.ValueType | None = ...,
     ) -> None: ...
     def HasField(
         self,
         field_name: typing_extensions.Literal[
-            "_dataset_name",
-            b"_dataset_name",
+            "_dataset_id",
+            b"_dataset_id",
             "_dataset_type",
             b"_dataset_type",
-            "dataset_name",
-            b"dataset_name",
+            "dataset_id",
+            b"dataset_id",
             "dataset_type",
             b"dataset_type",
         ],
@@ -1115,20 +1180,20 @@ class DatasetDefinition(google.protobuf.message.Message):
     def ClearField(
         self,
         field_name: typing_extensions.Literal[
-            "_dataset_name",
-            b"_dataset_name",
+            "_dataset_id",
+            b"_dataset_id",
             "_dataset_type",
             b"_dataset_type",
-            "dataset_name",
-            b"dataset_name",
+            "dataset_id",
+            b"dataset_id",
             "dataset_type",
             b"dataset_type",
         ],
     ) -> None: ...
     @typing.overload
     def WhichOneof(
-        self, oneof_group: typing_extensions.Literal["_dataset_name", b"_dataset_name"]
-    ) -> typing_extensions.Literal["dataset_name"] | None: ...
+        self, oneof_group: typing_extensions.Literal["_dataset_id", b"_dataset_id"]
+    ) -> typing_extensions.Literal["dataset_id"] | None: ...
     @typing.overload
     def WhichOneof(
         self, oneof_group: typing_extensions.Literal["_dataset_type", b"_dataset_type"]

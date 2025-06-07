@@ -17,17 +17,12 @@
 
 package org.apache.spark.sql.connect.pipelines
 
+import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters._
 
 import org.apache.spark.connect.proto
-import org.apache.spark.connect.proto.{
-  DatasetType,
-  Expression,
-  PipelineCommand,
-  Relation,
-  UnresolvedTableValuedFunction
-}
+import org.apache.spark.connect.proto.{DatasetType, Expression, PipelineCommand, Relation, UnresolvedTableValuedFunction}
 import org.apache.spark.connect.proto.PipelineCommand.{DefineDataset, DefineFlow}
 import org.apache.spark.internal.Logging
 
@@ -256,32 +251,103 @@ class SparkDeclarativePipelinesServerSuite
       val flowDefs = result.getFlowDefinitionsList.asScala
       assert(flowDefs.size == 3, "Expected 3 flow definitions")
 
-      val tableCFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.tableC").get
-      assert(tableCFlow.getTargetDatasetName == "spark_catalog.default.tableC")
-      val tableCInputs = tableCFlow.getInputDatasetNamesList.asScala.toSet
-      assert(tableCInputs.contains("spark_catalog.default.tableA"))
-      assert(tableCInputs.contains("viewB"))
+      val tableCFlow = flowDefs
+        .find(
+          f =>
+            f.getFlowId.getName == "tableC" &&
+            f.getFlowId.getCatalogName == "spark_catalog" &&
+            f.getFlowId.getNamespaceList.asScala.contains("default")
+        )
+        .get
+      assert(tableCFlow.getTargetDatasetId.getName == "tableC")
+      assert(tableCFlow.getTargetDatasetId.getCatalogName == "spark_catalog")
+      assert(tableCFlow.getTargetDatasetId.getNamespaceList.asScala.contains("default"))
 
-      val viewBFlow = flowDefs.find(_.getFlowName == "viewB").get
-      assert(viewBFlow.getTargetDatasetName == "viewB")
-      val viewBInputs = viewBFlow.getInputDatasetNamesList.asScala.toSet
-      assert(viewBInputs.contains("spark_catalog.default.tableA"))
+      val tableCInputs = tableCFlow.getInputDatasetIdsList.asScala
+      assert(
+        tableCInputs.exists(
+          id =>
+            id.getName == "tableA" &&
+            id.getCatalogName == "spark_catalog" &&
+            id.getNamespaceList.asScala.contains("default")
+        )
+      )
+      assert(
+        tableCInputs.exists(
+          id =>
+            id.getName == "viewB" &&
+            !id.hasCatalogName &&
+            id.getNamespaceCount == 0
+        )
+      )
 
-      val tableAFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.tableA").get
-      assert(tableAFlow.getTargetDatasetName == "spark_catalog.default.tableA")
-      assert(tableAFlow.getInputDatasetNamesCount == 0)
+      val viewBFlow = flowDefs
+        .find(
+          f =>
+            f.getFlowId.getName == "viewB" &&
+            !f.getFlowId.hasCatalogName &&
+            f.getFlowId.getNamespaceCount == 0
+        )
+        .get
+      assert(viewBFlow.getTargetDatasetId.getName == "viewB")
+      assert(!viewBFlow.getTargetDatasetId.hasCatalogName)
+      assert(viewBFlow.getTargetDatasetId.getNamespaceCount == 0)
+
+      val viewBInputs = viewBFlow.getInputDatasetIdsList.asScala
+      assert(
+        viewBInputs.exists(
+          id =>
+            id.getName == "tableA" &&
+            id.getCatalogName == "spark_catalog" &&
+            id.getNamespaceList.asScala.contains("default")
+        )
+      )
+
+      val tableAFlow = flowDefs
+        .find(
+          f =>
+            f.getFlowId.getName == "tableA" &&
+            f.getFlowId.getCatalogName == "spark_catalog" &&
+            f.getFlowId.getNamespaceList.asScala.contains("default")
+        )
+        .get
+      assert(tableAFlow.getTargetDatasetId.getName == "tableA")
+      assert(tableAFlow.getTargetDatasetId.getCatalogName == "spark_catalog")
+      assert(tableAFlow.getTargetDatasetId.getNamespaceList.asScala.contains("default"))
+      assert(tableAFlow.getInputDatasetIdsCount == 0)
 
       // Verify dataset definitions
       val datasetDefs = result.getDatasetDefinitionsList.asScala
       assert(datasetDefs.size == 3, "Expected 3 dataset definitions")
 
-      val tableADataset = datasetDefs.find(_.getDatasetName == "spark_catalog.default.tableA").get
+      val tableADataset = datasetDefs
+        .find(
+          d =>
+            d.getDatasetId.getName == "tableA" &&
+            d.getDatasetId.getCatalogName == "spark_catalog" &&
+            d.getDatasetId.getNamespaceList.asScala.contains("default")
+        )
+        .get
       assert(tableADataset.getDatasetType == DatasetType.MATERIALIZED_VIEW)
 
-      val viewBDataset = datasetDefs.find(_.getDatasetName == "viewB").get
+      val viewBDataset = datasetDefs
+        .find(
+          d =>
+            d.getDatasetId.getName == "viewB" &&
+            !d.getDatasetId.hasCatalogName &&
+            d.getDatasetId.getNamespaceCount == 0
+        )
+        .get
       assert(viewBDataset.getDatasetType == DatasetType.TEMPORARY_VIEW)
 
-      val tableCDataset = datasetDefs.find(_.getDatasetName == "spark_catalog.default.tableC").get
+      val tableCDataset = datasetDefs
+        .find(
+          d =>
+            d.getDatasetId.getName == "tableC" &&
+            d.getDatasetId.getCatalogName == "spark_catalog" &&
+            d.getDatasetId.getNamespaceList.asScala.contains("default")
+        )
+        .get
       assert(tableCDataset.getDatasetType == DatasetType.MATERIALIZED_VIEW)
     }
   }
@@ -345,70 +411,77 @@ class SparkDeclarativePipelinesServerSuite
       val flowDefs = result.getFlowDefinitionsList.asScala
       assert(flowDefs.size == 6, "Expected 6 flow definitions")
 
-      val finalFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.final").get
-      val finalInputs = finalFlow.getInputDatasetNamesList.asScala.toSet
-      assert(finalInputs.contains("spark_catalog.default.combined"))
-      assert(finalInputs.contains("spark_catalog.default.source1"))
+      // Helper function to find a flow by name
+      def findFlow(
+          name: String,
+          catalog: Option[String] = Some("spark_catalog"),
+          namespace: Option[String] = Some("default")): proto.ResolvedFlowDefinition = {
+        flowDefs.find { f =>
+          f.getFlowId.getName == name &&
+          catalog.forall(c => f.getFlowId.getCatalogName == c) &&
+          namespace.forall(ns => f.getFlowId.getNamespaceList.asScala.contains(ns))
+        }.get
+      }
 
-      val combinedFlow = flowDefs.find(_.getFlowName == "spark_catalog.default.combined").get
-      val combinedInputs = combinedFlow.getInputDatasetNamesList.asScala.toSet
-      assert(combinedInputs.contains("intermediate1"))
-      assert(combinedInputs.contains("intermediate2"))
+      // Helper function to check if an input dataset exists
+      def hasInputDataset(
+          inputs: mutable.Buffer[proto.DatasetIdentifier],
+          name: String,
+          catalog: Option[String] = None,
+          namespace: Option[String] = None): Boolean = {
+        inputs.exists { id =>
+          id.getName == name &&
+          catalog.forall(c => id.getCatalogName == c) &&
+          namespace.forall(ns => id.getNamespaceList.asScala.contains(ns))
+        }
+      }
 
-      val int1Flow = flowDefs.find(_.getFlowName == "intermediate1").get
-      val int1Inputs = int1Flow.getInputDatasetNamesList.asScala.toSet
-      assert(int1Inputs.contains("spark_catalog.default.source1"))
+      val finalFlow = findFlow("final")
+      val finalInputs = finalFlow.getInputDatasetIdsList.asScala
+      assert(hasInputDataset(finalInputs, "combined", Some("spark_catalog"), Some("default")))
+      assert(hasInputDataset(finalInputs, "source1", Some("spark_catalog"), Some("default")))
 
-      val int2Flow = flowDefs.find(_.getFlowName == "intermediate2").get
-      val int2Inputs = int2Flow.getInputDatasetNamesList.asScala.toSet
-      assert(int2Inputs.contains("spark_catalog.default.source2"))
+      val combinedFlow = findFlow("combined")
+      val combinedInputs = combinedFlow.getInputDatasetIdsList.asScala
+      assert(hasInputDataset(combinedInputs, "intermediate1", None, None))
+      assert(hasInputDataset(combinedInputs, "intermediate2", None, None))
 
-      val source1Flow = flowDefs.find(_.getFlowName == "spark_catalog.default.source1").get
-      assert(source1Flow.getInputDatasetNamesCount == 0)
+      val int1Flow = findFlow("intermediate1", None, None)
+      val int1Inputs = int1Flow.getInputDatasetIdsList.asScala
+      assert(hasInputDataset(int1Inputs, "source1", Some("spark_catalog"), Some("default")))
 
-      val source2Flow = flowDefs.find(_.getFlowName == "spark_catalog.default.source2").get
-      assert(source2Flow.getInputDatasetNamesCount == 0)
+      val int2Flow = findFlow("intermediate2", None, None)
+      val int2Inputs = int2Flow.getInputDatasetIdsList.asScala
+      assert(hasInputDataset(int2Inputs, "source2", Some("spark_catalog"), Some("default")))
+
+      val source1Flow = findFlow("source1")
+      assert(source1Flow.getInputDatasetIdsCount == 0)
+
+      val source2Flow = findFlow("source2")
+      assert(source2Flow.getInputDatasetIdsCount == 0)
 
       // Verify dataset definitions
       val datasetDefs = result.getDatasetDefinitionsList.asScala
       assert(datasetDefs.size == 6, "Expected 6 dataset definitions")
 
-      assert(
-        datasetDefs
-          .find(_.getDatasetName == "spark_catalog.default.source1")
-          .get
-          .getDatasetType == DatasetType.MATERIALIZED_VIEW
-      )
-      assert(
-        datasetDefs
-          .find(_.getDatasetName == "spark_catalog.default.source2")
-          .get
-          .getDatasetType == DatasetType.MATERIALIZED_VIEW
-      )
-      assert(
-        datasetDefs
-          .find(_.getDatasetName == "intermediate1")
-          .get
-          .getDatasetType == DatasetType.TEMPORARY_VIEW
-      )
-      assert(
-        datasetDefs
-          .find(_.getDatasetName == "intermediate2")
-          .get
-          .getDatasetType == DatasetType.TEMPORARY_VIEW
-      )
-      assert(
-        datasetDefs
-          .find(_.getDatasetName == "spark_catalog.default.combined")
-          .get
-          .getDatasetType == DatasetType.MATERIALIZED_VIEW
-      )
-      assert(
-        datasetDefs
-          .find(_.getDatasetName == "spark_catalog.default.final")
-          .get
-          .getDatasetType == DatasetType.MATERIALIZED_VIEW
-      )
+      // Helper function to find a dataset by name
+      def findDataset(
+          name: String,
+          catalog: Option[String] = Some("spark_catalog"),
+          namespace: Option[String] = Some("default")): proto.DatasetDefinition = {
+        datasetDefs.find { d =>
+          d.getDatasetId.getName == name &&
+          catalog.forall(c => d.getDatasetId.getCatalogName == c) &&
+          namespace.forall(ns => d.getDatasetId.getNamespaceList.asScala.contains(ns))
+        }.get
+      }
+
+      assert(findDataset("source1").getDatasetType == DatasetType.MATERIALIZED_VIEW)
+      assert(findDataset("source2").getDatasetType == DatasetType.MATERIALIZED_VIEW)
+      assert(findDataset("intermediate1", None, None).getDatasetType == DatasetType.TEMPORARY_VIEW)
+      assert(findDataset("intermediate2", None, None).getDatasetType == DatasetType.TEMPORARY_VIEW)
+      assert(findDataset("combined").getDatasetType == DatasetType.MATERIALIZED_VIEW)
+      assert(findDataset("final").getDatasetType == DatasetType.MATERIALIZED_VIEW)
     }
   }
 

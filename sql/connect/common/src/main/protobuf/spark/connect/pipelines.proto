@@ -192,13 +192,22 @@ message SourceCodeLocation {
   optional int32 line_number = 2;
 }
 
+message DatasetIdentifier {
+  // The catalog name.
+  optional string catalog_name = 1;
+  // The namespace components.
+  repeated string namespace = 2;
+  // The dataset name.
+  optional string name = 3;
+}
+
 message ResolvedFlowDefinition {
-  optional string flow_name = 1;
-  optional string target_dataset_name = 2;
-  repeated string input_dataset_names = 3;
+  optional DatasetIdentifier flow_id = 1;
+  optional DatasetIdentifier target_dataset_id = 2;
+  repeated DatasetIdentifier input_dataset_ids = 3;
 }
 
 message DatasetDefinition {
-  optional string dataset_name = 1;
+  optional DatasetIdentifier dataset_id = 1;
   optional DatasetType dataset_type = 2;
 }
